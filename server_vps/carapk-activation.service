@@ -1,0 +1,25 @@
+# systemd unit — copy to /etc/systemd/system/carapk-activation.service
+# then:  systemctl daemon-reload && systemctl enable --now carapk-activation
+[Unit]
+Description=Car APK activation API
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=carapk
+Group=carapk
+WorkingDirectory=/opt/carapk/server_vps
+# secrets live in this file (chmod 600, owned by carapk) — NOT in the repo:
+EnvironmentFile=/etc/carapk/activation.env
+ExecStart=/opt/carapk/venv/bin/uvicorn main:app --host 127.0.0.1 --port 8080
+Restart=always
+RestartSec=3
+# hardening
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadWritePaths=/var/lib/carapk
+
+[Install]
+WantedBy=multi-user.target

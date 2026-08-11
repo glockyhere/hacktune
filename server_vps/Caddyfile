@@ -1,0 +1,7 @@
+# /etc/caddy/Caddyfile — auto-HTTPS reverse proxy in front of the API.
+# Point an A record (e.g. api.yourdomain.com -> your VPS IP) first; Caddy then
+# fetches and renews a Let's Encrypt cert automatically.
+
+api.yourdomain.com {
+    reverse_proxy 127.0.0.1:8080
+}

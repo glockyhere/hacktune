@@ -7,9 +7,11 @@ program does everything else.
 **Activation model:** each install is a one-time, **pay-then-you-approve**
 session. The buyer enters VIN + make/model, sees your card + contacts, and waits
 for your approval; on approval the program receives a single-use, server-signed
-token and installs once. See [`docs/ACTIVATION.md`](docs/ACTIVATION.md) for the
-Cloudflare Worker backend. (An older offline license-key mode still exists in
-`keygen/` but the activation backend supersedes it.)
+token and installs once. Backend options:
+**[`docs/ACTIVATION_VPS.md`](docs/ACTIVATION_VPS.md)** (self-hosted API + Telegram
+bot on your VPS, APKs on R2) or [`docs/ACTIVATION.md`](docs/ACTIVATION.md)
+(Cloudflare Worker). (An older offline license-key mode still exists in `keygen/`
+but the activation backend supersedes it.)
 
 ### What it installs (fixed payload, nothing else)
 1. **Back Button** (`nu.back.button`) → install, grant overlay, enable its

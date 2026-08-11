@@ -1,8 +1,11 @@
 # --- payload binaries: hosted in the cloud, never committed -------------------
 payload/*.apk
 
-# --- secrets: the license signing private key must NEVER be committed ---------
+# --- secrets: signing keys / filled env files must NEVER be committed ---------
 keygen/license_private.key
+server_vps/*.env
+!server_vps/*.env.example
+*.db
 
 # --- python / build artifacts -------------------------------------------------
 __pycache__/
