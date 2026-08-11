@@ -1,0 +1,23 @@
+# --- payload binaries: hosted in the cloud, never committed -------------------
+payload/*.apk
+
+# --- secrets: the license signing private key must NEVER be committed ---------
+keygen/license_private.key
+
+# --- python / build artifacts -------------------------------------------------
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+dist/
+build/CarApkInstaller/
+*.egg-info/
+
+# --- external tools (fetched per machine) -------------------------------------
+tools/platform-tools/
+tools/build-tools/
+tools/jre/
+
+# --- os junk ------------------------------------------------------------------
+.DS_Store
+Thumbs.db

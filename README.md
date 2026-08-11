@@ -1,0 +1,104 @@
+# Car Head-Unit Setup — single paywalled Windows program
+
+One `.exe` that provisions an ECARX/FAW head unit with our exact set, in the
+exact order we did it by hand. The buyer only enables **Wireless ADB**; the
+program does everything else.
+
+### What it installs (fixed payload, nothing else)
+1. **Back Button** (`nu.back.button`) → install, grant overlay, enable its
+   accessibility service → floating system-back button appears.
+2. **FreeTube** (`freetube.com`) → install.
+3. **Wi-Fi tile** (`com.wifi.shortcut`) → install (opens the hidden Wi-Fi screen).
+4. **Yandex Navi** (`ru.yandex.yandexnavi`) → install (already signature-patched so
+   it doesn't crash) → grant location/storage/mic permissions.
+5. **Patched launcher** (`com.fawcar.dlife6.launcher`) → install as a system
+   update, then restart it so the **Wi-Fi / FreeTube / Навигатор** tiles show.
+
+Apps go on **before** the launcher on purpose — its tiles launch those packages
+by name, so they must exist first.
+
+All five APKs are pre-aligned and signed with the AOSP **platform** key the unit
+trusts (its `apkauth` requirement), and Navi is pre-patched. The program just
+`adb install`s them — no signing/patching at runtime — so the only tool it needs
+is **adb**.
+
+### Cloud payload
+The APKs are **not** bundled in the exe. The program **downloads them from your
+cloud every run** (`config.APK_BASE_URL`) and verifies each file's **SHA-256**
+against a value pinned in `app/provision.py` before installing — a tampered or
+wrong download is rejected. This keeps the exe small (~15 MB) and lets you update
+the payload without reshipping the program. Upload the files in `payload/` to any
+static host — see [`payload/UPLOAD.md`](payload/UPLOAD.md).
+
+---
+
+## Files
+
+```
+CarApkInstaller/
+├─ app/                  the program (paywall + fixed provisioning flow)
+│  ├─ config.py          ← EDIT: your card, contacts, price, license public key
+│  ├─ licensing.py       Ed25519 license verify + machine-id binding
+│  ├─ provision.py       the exact ordered install + post-steps
+│  ├─ engine.py          adb connect / mDNS reconnect
+│  └─ gui.py             paywall + one “Install everything” button
+├─ payload/              the 5 pre-signed/patched APKs (bundled into the exe)
+├─ keygen/               ★ SELLER-ONLY. Never ship. (make + issue license keys)
+├─ tools/fetch_tools.ps1 downloads adb
+├─ build/CarApkInstaller.spec
+├─ build.bat
+└─ requirements.txt
+```
+
+Ship `dist\CarApkInstaller.exe` + `dist\tools\` (adb). The exe is small (~15 MB)
+because the APKs are pulled from your cloud at runtime, not bundled.
+
+---
+
+## Build the `.exe` (on Windows — PyInstaller can’t cross-compile)
+
+```bat
+powershell -ExecutionPolicy Bypass -File tools\fetch_tools.ps1   :: gets adb
+python keygen\generate_keys.py                                   :: prints PUBLIC key
+:: 1. upload payload\*.apk to your cloud (see payload\UPLOAD.md)
+:: 2. edit app\config.py:
+::      - APK_BASE_URL  = your cloud folder URL (trailing slash)
+::      - LICENSE_PUBLIC_KEY = the printed public key
+::      - your card / contacts / price
+build.bat                                                        :: → dist\CarApkInstaller.exe
+```
+
+## Sell / activate
+Buyer runs exe → paywall shows **your card + contacts + their Machine ID** →
+they pay you and send the Machine ID → you mint their key:
+```bat
+python keygen\issue_license.py ABCD-EF12-3456-7890 --ref "buyer note"
+```
+Buyer pastes key → **Activate** → the “Install everything to the car” button
+unlocks.
+
+## Buyer runs it
+1. Head unit → Developer options → **enable Wireless ADB** (same Wi-Fi as PC),
+   approve the ADB prompt once.
+2. Press **Detect / Reconnect** (auto-finds the unit even when its IP changes).
+3. Press **Install everything to the car** and watch the log.
+
+---
+
+## Security model (honest)
+- License keys are **Ed25519-signed** — only you (holder of
+  `keygen/license_private.key`) can mint them; the app ships only the public key.
+- Each key is **bound to the buyer’s Machine ID**, so it won’t work on another PC.
+- A determined person can still patch the compiled binary to skip the check —
+  that is true of any offline program. Server-side activation is the only way to
+  remove that; ask if you want it.
+- Back up `keygen/license_private.key`. If it leaks, anyone can mint keys.
+
+## Legal note
+This ships pre-patched third-party apps (e.g. a signature-patched Yandex
+Navigator, a modified FAW launcher, re-signed FreeTube). Re-signing/patching apps
+for a device you own is one thing; **redistributing modified copies to paying
+customers can violate those apps’ licenses/copyright.** The paywall does not make
+that legal — this is your call as the seller. Consider shipping only the tools you
+authored (Wi-Fi tile, launcher tweaks, back-button enablement) and letting buyers
+supply Navi/FreeTube themselves.
