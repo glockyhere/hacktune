@@ -1,0 +1,20 @@
+name = "carapk-activation"
+main = "worker.js"
+compatibility_date = "2024-09-23"
+# Ed25519 in Web Crypto is available on modern compatibility dates.
+
+# KV namespace that stores activation requests.
+# Create it once with:   npx wrangler kv namespace create ACTIVATIONS
+# then paste the printed id below.
+[[kv_namespaces]]
+binding = "ACTIVATIONS"
+id = "PASTE_KV_NAMESPACE_ID_HERE"
+
+# Optional Telegram notify/approve (leave unset to use only the admin page):
+# [vars]
+# TG_CHAT_ID = "123456789"
+
+# Secrets (do NOT put here — set with `wrangler secret put`):
+#   SIGNING_KEY_PKCS8   from keygen/generate_activation_keys.py
+#   ADMIN_TOKEN         a long random password for the admin page
+#   TG_BOT_TOKEN        (optional) Telegram bot token

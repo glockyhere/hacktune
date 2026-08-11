@@ -4,6 +4,13 @@ One `.exe` that provisions an ECARX/FAW head unit with our exact set, in the
 exact order we did it by hand. The buyer only enables **Wireless ADB**; the
 program does everything else.
 
+**Activation model:** each install is a one-time, **pay-then-you-approve**
+session. The buyer enters VIN + make/model, sees your card + contacts, and waits
+for your approval; on approval the program receives a single-use, server-signed
+token and installs once. See [`docs/ACTIVATION.md`](docs/ACTIVATION.md) for the
+Cloudflare Worker backend. (An older offline license-key mode still exists in
+`keygen/` but the activation backend supersedes it.)
+
 ### What it installs (fixed payload, nothing else)
 1. **Back Button** (`nu.back.button`) → install, grant overlay, enable its
    accessibility service → floating system-back button appears.
@@ -68,19 +75,18 @@ python keygen\generate_keys.py                                   :: prints PUBLI
 build.bat                                                        :: → dist\CarApkInstaller.exe
 ```
 
-## Sell / activate
-Buyer runs exe → paywall shows **your card + contacts + their Machine ID** →
-they pay you and send the Machine ID → you mint their key:
-```bat
-python keygen\issue_license.py ABCD-EF12-3456-7890 --ref "buyer note"
-```
-Buyer pastes key → **Activate** → the “Install everything to the car” button
-unlocks.
+## Sell / activate (per install)
+1. Buyer runs the exe → enters **VIN + make + model**, sees **your card +
+   contacts**, taps **Request activation**.
+2. Buyer pays you and sends the shown **request code**.
+3. You **Approve** (Telegram button or the admin page) after seeing the payment.
+4. The program auto-unlocks and installs. Full backend setup:
+   [`docs/ACTIVATION.md`](docs/ACTIVATION.md).
 
 ## Buyer runs it
-1. Head unit → Developer options → **enable Wireless ADB** (same Wi-Fi as PC),
-   approve the ADB prompt once.
-2. Press **Detect / Reconnect** (auto-finds the unit even when its IP changes).
+1. Enter VIN + make/model → **Request activation** → pay → wait for approval.
+2. Head unit → Developer options → **enable Wireless ADB** (same Wi-Fi as PC),
+   approve the ADB prompt once → press **Detect / Reconnect**.
 3. Press **Install everything to the car** and watch the log.
 
 ---

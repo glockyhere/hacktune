@@ -1,145 +1,193 @@
-"""Tkinter GUI: paywall gate, then the installer."""
+"""
+Tkinter GUI — per-install activation flow:
+
+  1. Buyer enters VIN + make + model, sees your card + contacts, taps Request.
+  2. Program submits the request; buyer pays you and messages you the code.
+  3. You approve (phone/admin page); the program receives a one-time signed token,
+     verifies it (bound to this machine + VIN), and unlocks the installer once.
+"""
 from __future__ import annotations
 import threading
 import tkinter as tk
-from tkinter import filedialog, ttk
 
-from . import config, licensing, engine, provision
+from . import config, licensing, engine, provision, activation
 
-BG = "#0f1420"
-CARD = "#1b2333"
-FG = "#e8ecf5"
-MUTED = "#8b95a7"
-ACCENT = "#3d7bff"
-OK = "#37c281"
-ERR = "#ff6b6b"
-FONT = ("Segoe UI", 11)
-FONT_B = ("Segoe UI", 11, "bold")
-FONT_H = ("Segoe UI", 18, "bold")
+BG = "#0f1420"; CARD = "#1b2333"; FG = "#e8ecf5"; MUTED = "#8b95a7"
+ACCENT = "#3d7bff"; OK = "#37c281"; ERR = "#ff6b6b"
+FONT = ("Segoe UI", 11); FONT_B = ("Segoe UI", 11, "bold"); FONT_H = ("Segoe UI", 18, "bold")
 
 
 class App(tk.Tk):
     def __init__(self):
         super().__init__()
         self.title(f"{config.PRODUCT_NAME} {config.PRODUCT_VERSION}")
-        self.configure(bg=BG)
-        self.geometry("760x620")
-        self.minsize(720, 580)
-        self.serial: str | None = None
+        self.configure(bg=BG); self.geometry("780x680"); self.minsize(740, 620)
+        self.serial = None
+        self._poll_stop = False
+        self.build_request()
 
-        st = licensing.current_status()
-        if st.ok:
-            self.build_main(st)
-        else:
-            self.build_paywall()
-
-    # ---- helpers ---------------------------------------------------------- #
+    # ---- ui helpers ------------------------------------------------------- #
     def _clear(self):
+        self._poll_stop = True
         for w in self.winfo_children():
             w.destroy()
 
-    def _label(self, parent, text, font=FONT, fg=FG, **kw):
-        return tk.Label(parent, text=text, font=font, fg=fg, bg=kw.pop("bg", BG),
+    def _label(self, parent, text, font=FONT, fg=FG, bg=None, **kw):
+        return tk.Label(parent, text=text, font=font, fg=fg, bg=bg or BG,
                         justify=kw.pop("justify", "left"), **kw)
 
-    # ---- paywall ---------------------------------------------------------- #
-    def build_paywall(self):
-        self._clear()
-        wrap = tk.Frame(self, bg=BG)
-        wrap.pack(fill="both", expand=True, padx=24, pady=18)
+    def _btn(self, primary=False):
+        return dict(font=FONT_B, fg="#fff", bg=ACCENT if primary else "#2a3550",
+                    activebackground=ACCENT, activeforeground="#fff", relief="flat",
+                    bd=0, padx=14, pady=8, cursor="hand2")
 
-        self._label(wrap, config.PRODUCT_NAME, font=FONT_H).pack(anchor="w")
-        self._label(wrap, f"License required — {config.PRICE_TEXT}", fg=MUTED).pack(anchor="w", pady=(2, 14))
+    def _copy(self, text):
+        self.clipboard_clear(); self.clipboard_append(text)
 
-        pay = tk.Frame(wrap, bg=CARD)
-        pay.pack(fill="x", pady=(0, 12))
+    def _payment_card(self, parent):
+        pay = tk.Frame(parent, bg=CARD); pay.pack(fill="x", pady=(0, 12))
         inner = tk.Frame(pay, bg=CARD); inner.pack(fill="x", padx=16, pady=14)
         self._label(inner, "Pay to card", fg=MUTED, bg=CARD).pack(anchor="w")
-        self._label(inner, config.PAYMENT["card_number"], font=("Consolas", 18, "bold"),
-                    bg=CARD).pack(anchor="w", pady=(0, 2))
-        self._label(inner, f'{config.PAYMENT["card_holder"]}   ·   {config.PAYMENT["bank_hint"]}',
-                    fg=MUTED, bg=CARD).pack(anchor="w")
-        tk.Frame(inner, bg="#2a3550", height=1).pack(fill="x", pady=10)
-        c = config.CONTACTS
-        self._label(inner, "Contacts", fg=MUTED, bg=CARD).pack(anchor="w")
-        self._label(inner, f'Telegram: {c["telegram"]}    Phone: {c["phone"]}    Email: {c["email"]}',
+        self._label(inner, config.PAYMENT["card_number"], font=("Consolas", 17, "bold"),
                     bg=CARD).pack(anchor="w")
-        self._label(inner, config.PAYMENT_INSTRUCTIONS, fg=MUTED, bg=CARD).pack(anchor="w", pady=(10, 0))
+        self._label(inner, f'{config.PAYMENT["card_holder"]}   ·   {config.PAYMENT["bank_hint"]}   ·   {config.PRICE_TEXT}',
+                    fg=MUTED, bg=CARD).pack(anchor="w")
+        c = config.CONTACTS
+        tk.Frame(inner, bg="#2a3550", height=1).pack(fill="x", pady=8)
+        self._label(inner, f'Contact: {c["telegram"]}   {c["phone"]}   {c["email"]}',
+                    bg=CARD).pack(anchor="w")
+
+    # ---- screen 1: request ----------------------------------------------- #
+    def build_request(self):
+        self._clear(); self._poll_stop = False
+        w = tk.Frame(self, bg=BG); w.pack(fill="both", expand=True, padx=24, pady=18)
+        self._label(w, config.PRODUCT_NAME, font=FONT_H).pack(anchor="w")
+        self._label(w, "New installation — one approval per car.", fg=MUTED).pack(anchor="w", pady=(2, 12))
+        self._payment_card(w)
+
+        form = tk.Frame(w, bg=BG); form.pack(fill="x")
+        self.vin = tk.StringVar(); self.make = tk.StringVar(); self.model = tk.StringVar()
+        def row(lbl, var, width=32):
+            r = tk.Frame(form, bg=BG); r.pack(fill="x", pady=3)
+            self._label(r, lbl, fg=MUTED, width=8).pack(side="left")
+            e = tk.Entry(r, textvariable=var, font=("Consolas", 12), fg=FG, bg=CARD,
+                         insertbackground=FG, relief="flat", width=width)
+            e.pack(side="left"); return e
+        row("VIN", self.vin); row("Make", self.make); row("Model", self.model)
 
         mid = licensing.machine_id()
-        midf = tk.Frame(wrap, bg=BG); midf.pack(fill="x", pady=(2, 8))
-        self._label(midf, "Your Machine ID:", fg=MUTED).pack(side="left")
-        e = tk.Entry(midf, font=("Consolas", 12, "bold"), fg=FG, bg=CARD,
-                     insertbackground=FG, relief="flat", width=24)
-        e.insert(0, mid); e.configure(state="readonly")
-        e.pack(side="left", padx=8)
-        tk.Button(midf, text="Copy", command=lambda: self._copy(mid), **self._btn()).pack(side="left")
+        m = tk.Frame(w, bg=BG); m.pack(fill="x", pady=(10, 4))
+        self._label(m, "Machine ID:", fg=MUTED).pack(side="left")
+        self._label(m, mid, font=("Consolas", 12, "bold")).pack(side="left", padx=8)
 
-        self._label(wrap, "Paste your license key:", fg=MUTED).pack(anchor="w", pady=(10, 2))
-        self.key_txt = tk.Text(wrap, height=3, font=("Consolas", 10), fg=FG, bg=CARD,
-                               insertbackground=FG, relief="flat", wrap="char")
-        self.key_txt.pack(fill="x")
+        self.req_status = self._label(w, "", fg=ERR); self.req_status.pack(anchor="w", pady=(6, 0))
+        if not activation.configured():
+            self.req_status.configure(
+                text="⚠ Activation server not configured (ACTIVATION_API_URL / PUBLIC_KEY).", fg=ERR)
+        tk.Button(w, text="Request activation", command=self._submit,
+                  **self._btn(primary=True)).pack(anchor="w", pady=(10, 0))
 
-        self.pw_status = self._label(wrap, "", fg=ERR); self.pw_status.pack(anchor="w", pady=(8, 0))
-        tk.Button(wrap, text="Activate", command=self._activate,
-                  **self._btn(primary=True)).pack(anchor="w", pady=(8, 0))
+    def _submit(self):
+        vin = self.vin.get().strip()
+        if len(vin) < 11 or not vin.isalnum():
+            self.req_status.configure(text="Enter a valid VIN (11–17 letters/digits).", fg=ERR); return
+        if not self.make.get().strip() or not self.model.get().strip():
+            self.req_status.configure(text="Enter make and model.", fg=ERR); return
+        if not activation.configured():
+            self.req_status.configure(text="Activation server not configured.", fg=ERR); return
+        self.req_status.configure(text="Submitting…", fg=MUTED)
+        def worker():
+            try:
+                rid, code = activation.submit_request(vin, self.make.get(), self.model.get())
+                self.after(0, lambda: self.build_wait(rid, code, vin))
+            except Exception as e:
+                self.after(0, lambda: self.req_status.configure(
+                    text=f"Could not reach the activation server: {e}", fg=ERR))
+        threading.Thread(target=worker, daemon=True).start()
 
-    def _activate(self):
-        key = self.key_txt.get("1.0", "end").strip()
-        res = licensing.verify_license(key)
-        if res.ok:
-            licensing.save_license(key)
-            self.build_main(res)
-        else:
-            self.pw_status.configure(text="✗ " + res.reason, fg=ERR)
+    # ---- screen 2: waiting for approval ----------------------------------- #
+    def build_wait(self, rid, code, vin):
+        self._clear(); self._poll_stop = False
+        w = tk.Frame(self, bg=BG); w.pack(fill="both", expand=True, padx=24, pady=18)
+        self._label(w, "Waiting for approval", font=FONT_H).pack(anchor="w")
+        self._payment_card(w)
 
-    # ---- main installer --------------------------------------------------- #
-    def build_main(self, status: licensing.LicenseResult):
-        self._clear()
-        wrap = tk.Frame(self, bg=BG); wrap.pack(fill="both", expand=True, padx=24, pady=18)
+        box = tk.Frame(w, bg=CARD); box.pack(fill="x", pady=(0, 12))
+        bi = tk.Frame(box, bg=CARD); bi.pack(fill="x", padx=16, pady=14)
+        self._label(bi, "Your request code", fg=MUTED, bg=CARD).pack(anchor="w")
+        cr = tk.Frame(bi, bg=CARD); cr.pack(anchor="w")
+        self._label(cr, code, font=("Consolas", 22, "bold"), bg=CARD).pack(side="left")
+        tk.Button(cr, text="Copy", command=lambda: self._copy(code), **self._btn()).pack(side="left", padx=10)
+        self._label(bi, f'Pay to the card above, then send code "{code}" to {config.CONTACTS["telegram"]}.\n'
+                        "This screen unlocks automatically once it is approved.",
+                    fg=MUTED, bg=CARD).pack(anchor="w", pady=(6, 0))
 
-        top = tk.Frame(wrap, bg=BG); top.pack(fill="x")
-        self._label(top, config.PRODUCT_NAME, font=FONT_H).pack(side="left")
-        ref = status.payload.get("ref") or status.payload.get("mid", "")
-        self._label(top, f"Licensed · {ref}", fg=OK).pack(side="right")
+        self.wait_status = self._label(w, "● waiting…", fg=MUTED); self.wait_status.pack(anchor="w", pady=(6, 0))
+        tk.Button(w, text="Cancel", command=self.build_request, **self._btn()).pack(anchor="w", pady=(10, 0))
 
-        self._label(wrap, "Step 1 — On the head unit, enable Developer options → "
-                    "Wireless ADB. Everything else is automatic.", fg=MUTED,
-                    wraplength=700).pack(anchor="w", pady=(6, 12))
+        threading.Thread(target=self._poll, args=(rid, vin), daemon=True).start()
 
-        dev = tk.Frame(wrap, bg=CARD); dev.pack(fill="x")
+    def _poll(self, rid, vin):
+        import time
+        dots = 0
+        while not self._poll_stop:
+            try:
+                status, token = activation.poll_status(rid)
+            except Exception:
+                status, token = "pending", None
+            if status == "approved" and token:
+                res = activation.verify_token(token, vin)
+                if res.ok:
+                    self.after(0, lambda: self.build_installer(res.payload, rid, vin))
+                    return
+                self.after(0, lambda: self.wait_status.configure(
+                    text="✗ " + res.reason, fg=ERR)); return
+            if status == "rejected":
+                self.after(0, lambda: self.wait_status.configure(
+                    text="✗ Request was rejected. You can submit a new one.", fg=ERR)); return
+            dots = (dots + 1) % 4
+            self.after(0, lambda d=dots: self.wait_status.configure(
+                text="● waiting for approval" + "." * d, fg=MUTED))
+            for _ in range(10):
+                if self._poll_stop: return
+                time.sleep(0.5)
+
+    # ---- screen 3: installer (unlocked once) ------------------------------ #
+    def build_installer(self, payload, rid, vin):
+        self._clear(); self._poll_stop = True
+        self._rid = rid; self._done = False
+        w = tk.Frame(self, bg=BG); w.pack(fill="both", expand=True, padx=24, pady=18)
+        top = tk.Frame(w, bg=BG); top.pack(fill="x")
+        self._label(top, "Approved", font=FONT_H, fg=OK).pack(side="left")
+        self._label(top, f"VIN {payload.get('vin','')} · {payload.get('make','')} {payload.get('model','')}",
+                    fg=MUTED).pack(side="right")
+        self._label(w, "On the head unit enable Developer options → Wireless ADB, then press Detect.",
+                    fg=MUTED, wraplength=720).pack(anchor="w", pady=(6, 10))
+
+        dev = tk.Frame(w, bg=CARD); dev.pack(fill="x")
         di = tk.Frame(dev, bg=CARD); di.pack(fill="x", padx=16, pady=12)
-        self.dev_lbl = self._label(di, "Device: not connected", bg=CARD)
-        self.dev_lbl.pack(side="left")
-        tk.Button(di, text="Detect / Reconnect", command=self._detect_async,
-                  **self._btn()).pack(side="right")
+        self.dev_lbl = self._label(di, "Device: not connected", bg=CARD); self.dev_lbl.pack(side="left")
+        tk.Button(di, text="Detect / Reconnect", command=self._detect_async, **self._btn()).pack(side="right")
 
-        items = tk.Frame(wrap, bg=CARD); items.pack(fill="x", pady=(12, 6))
+        items = tk.Frame(w, bg=CARD); items.pack(fill="x", pady=(12, 6))
         ii = tk.Frame(items, bg=CARD); ii.pack(fill="x", padx=16, pady=12)
-        self._label(ii, "This will install, in order:", fg=MUTED, bg=CARD).pack(anchor="w")
+        self._label(ii, "Installs, in order:", fg=MUTED, bg=CARD).pack(anchor="w")
         for s in provision.STEPS:
             self._label(ii, f"   • {s['name']}", bg=CARD).pack(anchor="w")
 
-        act = tk.Frame(wrap, bg=BG); act.pack(fill="x", pady=(10, 6))
-        self.go_btn = tk.Button(act, text="Install everything to the car",
+        self.go_btn = tk.Button(w, text="Install everything to the car",
                                 command=self._provision_async, **self._btn(primary=True))
-        self.go_btn.pack(side="left")
-
-        self._label(wrap, "Log", fg=MUTED).pack(anchor="w", pady=(8, 2))
-        self.log_txt = tk.Text(wrap, height=16, font=("Consolas", 10), fg=FG, bg="#0b0f18",
+        self.go_btn.pack(anchor="w", pady=(8, 6))
+        self._label(w, "Log", fg=MUTED).pack(anchor="w", pady=(6, 2))
+        self.log_txt = tk.Text(w, height=13, font=("Consolas", 10), fg=FG, bg="#0b0f18",
                                insertbackground=FG, relief="flat", wrap="word")
-        self.log_txt.pack(fill="both", expand=True)
-        self.log_txt.configure(state="disabled")
-
+        self.log_txt.pack(fill="both", expand=True); self.log_txt.configure(state="disabled")
         self._detect_async()
 
-    # ---- actions ---------------------------------------------------------- #
-    def log(self, msg: str):
+    def log(self, msg):
         def _():
-            self.log_txt.configure(state="normal")
-            self.log_txt.insert("end", msg + "\n")
-            self.log_txt.see("end")
-            self.log_txt.configure(state="disabled")
+            self.log_txt.configure(state="normal"); self.log_txt.insert("end", msg + "\n")
+            self.log_txt.see("end"); self.log_txt.configure(state="disabled")
         self.after(0, _)
 
     def _detect_async(self):
@@ -149,39 +197,30 @@ class App(tk.Tk):
         self.serial = engine.ensure_device(self.log)
         if self.serial:
             info = engine.device_info(self.serial, None)
-            txt = f"Device: {info.get('model','?')} · Android {info.get('android','?')} " \
-                  f"(API {info.get('sdk','?')}) · {self.serial}"
-            self.after(0, lambda: self.dev_lbl.configure(text=txt, fg=OK))
+            t = f"Device: {info.get('model','?')} · Android {info.get('android','?')} (API {info.get('sdk','?')})"
+            self.after(0, lambda: self.dev_lbl.configure(text=t, fg=OK))
         else:
             self.after(0, lambda: self.dev_lbl.configure(text="Device: not connected", fg=ERR))
 
-    def _guard(self) -> bool:
-        if not licensing.current_status().ok:
-            self.build_paywall(); return False
-        if not self.serial:
-            self.log("No device connected. Press Detect / Reconnect first."); return False
-        return True
-
     def _provision_async(self):
-        if not self._guard():
+        if self._done:
             return
+        if not self.serial:
+            self.log("No device. Press Detect / Reconnect first."); return
         self.go_btn.configure(state="disabled", text="Installing…")
         def worker():
+            ok = False
             try:
-                provision.provision(self.serial, self.log)
+                ok = provision.provision(self.serial, self.log)
             finally:
-                self.after(0, lambda: self.go_btn.configure(
-                    state="normal", text="Install everything to the car"))
+                if ok:
+                    activation.mark_consumed(self._rid)
+                    self._done = True
+                    self.after(0, lambda: self.go_btn.configure(text="Done ✓"))
+                else:
+                    self.after(0, lambda: self.go_btn.configure(
+                        state="normal", text="Retry install"))
         threading.Thread(target=worker, daemon=True).start()
-
-    # ---- small ui utils --------------------------------------------------- #
-    def _copy(self, text: str):
-        self.clipboard_clear(); self.clipboard_append(text)
-
-    def _btn(self, primary: bool = False):
-        return dict(font=FONT_B, fg="#ffffff", bg=ACCENT if primary else "#2a3550",
-                    activebackground=ACCENT, activeforeground="#fff", relief="flat",
-                    bd=0, padx=14, pady=8, cursor="hand2")
 
 
 def run():
