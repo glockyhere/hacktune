@@ -54,4 +54,4 @@ LICENSE_PRODUCT_TAG = "carapk-v1"
 # trailing slash. The program requests APK_BASE_URL + <filename>.
 # Each file's SHA-256 is pinned in the app (app/provision.py), so a wrong or
 # tampered download is rejected before anything is installed.
-APK_BASE_URL = "https://your-cloud-host.example.com/carapk/"
+APK_BASE_URL = "https://pub-ded3ae84f48f43ac986e4968911418c4.r2.dev/"
