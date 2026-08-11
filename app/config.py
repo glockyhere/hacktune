@@ -50,10 +50,10 @@ LICENSE_PRODUCT_TAG = "carapk-v1"
 # ---- Activation backend (per-install approval) ------------------------------
 # Your Cloudflare Worker base URL (from `wrangler deploy`), e.g.
 #   https://carapk-activation.<your-subdomain>.workers.dev
-ACTIVATION_API_URL = "https://carapk-activation.example.workers.dev"
+ACTIVATION_API_URL = "https://api.89.117.48.15.nip.io"
 # The ACTIVATION_PUBLIC_KEY printed by keygen/generate_activation_keys.py.
 # The program verifies activation tokens with this; it can never mint them.
-ACTIVATION_PUBLIC_KEY = "PASTE_ACTIVATION_PUBLIC_KEY_HERE"
+ACTIVATION_PUBLIC_KEY = "5ntdtlX6okGI9OkAihydEHi0lVoyC3xLQ-LMQzcAiiU"
 
 # ---- Cloud payload ----------------------------------------------------------
 # The APKs are NOT bundled — the program downloads them from here every run.
