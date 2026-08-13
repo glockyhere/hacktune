@@ -6,6 +6,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "prebuild": "node scripts/gen-config.mjs",
     "build": "vite build",
     "preview": "vite preview",
     "preflight": "node scripts/preflight.mjs"

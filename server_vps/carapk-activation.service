@@ -11,7 +11,7 @@ Group=carapk
 WorkingDirectory=/opt/carapk/server_vps
 # secrets live in this file (chmod 600, owned by carapk) — NOT in the repo:
 EnvironmentFile=/etc/carapk/activation.env
-ExecStart=/opt/carapk/venv/bin/uvicorn main:app --host 127.0.0.1 --port 8080
+ExecStart=/opt/carapk/venv/bin/uvicorn main:app --host 127.0.0.1 --port 8081
 Restart=always
 RestartSec=3
 # hardening
