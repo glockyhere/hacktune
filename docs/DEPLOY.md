@@ -124,6 +124,40 @@ build is still running.
 
 ## 5. Build and publish the client
 
+Pick one of the two Pages workflows. Both end at the same `dist/`.
+
+### 5a. Git-connected (Pages builds from your repo)
+
+Cloudflare Pages → Create → Connect to Git → pick the repo, then:
+
+| Field | Value |
+|---|---|
+| Framework preset | `None` |
+| Build command | `npm run build` |
+| Build output directory | `dist` |
+| Root directory (advanced) | `webapp` |
+
+Root directory is the one people get wrong: the client lives in a subdirectory,
+and the other two paths are relative to it.
+
+Then set **Settings → Environment variables**. The build reads these and writes
+`config.js`, so your card numbers live in Cloudflare rather than in git history:
+
+| Variable | Example |
+|---|---|
+| `NODE_VERSION` | `20` |
+| `CARAPK_API` | `https://api.example.com` |
+| `CARAPK_CARD_1_BRAND` / `_NUMBER` / `_HOLDER` | `UZCARD` / `8600 …` / `YOUR NAME` |
+| `CARAPK_CARD_2_BRAND` / `_NUMBER` / `_HOLDER` | `HUMO` / `9860 …` / `YOUR NAME` |
+| `CARAPK_TELEGRAM` | `@your_handle` |
+| `CARAPK_PRICE_TEXT` | `200 000 so'm` |
+
+Without `CARAPK_API` the build keeps the committed placeholders and your live
+site says `YOUR NAME`. That is the single most likely way to ship a broken
+payment step, so set the variables before the first deploy.
+
+### 5b. Direct upload (build locally, push the folder)
+
 ```bash
 cd webapp
 npm ci
@@ -132,10 +166,16 @@ npm run preflight      # refuses to ship placeholder cards / http API
 npx wrangler pages deploy dist --project-name carapk
 ```
 
-Then in Pages → Custom domains, add `example.com`.
+Here `deploy/configure.py` has already written the real `config.js`, so no
+environment variables are needed.
 
-`npm run preflight` is not optional: `config.js` is hand-editable and public, so
-it is exactly the file most likely to go live still saying `YOUR NAME`.
+### Either way
+
+Add `example.com` under Pages → Custom domains.
+
+Run `npm run preflight` before trusting a build: `config.js` is public and
+hand-editable, so it is exactly the file most likely to go live still saying
+`YOUR NAME`.
 
 ## 6. Verify the live site
 
