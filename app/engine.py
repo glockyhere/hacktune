@@ -131,6 +131,54 @@ def ensure_device(log: Log) -> str | None:
     return None
 
 
+def is_wireless(serial: str) -> bool:
+    """True for a network transport, false for USB.
+
+    Two shapes occur: a plain `192.168.1.50:5555`, and the mDNS service name
+    Android 11 wireless debugging reports, `adb-<id>-XXXX._adb-tls-connect._tcp`.
+    """
+    s = serial or ""
+    return bool(re.fullmatch(r"\d+\.\d+\.\d+\.\d+:\d+", s)) or "_tcp" in s
+
+
+def is_alive(serial: str) -> bool:
+    try:
+        cp = _adb(["shell", "echo ok"], None, serial=serial, timeout=10)
+        return "ok" in (cp.stdout or "")
+    except Exception:
+        return False
+
+
+def reconnect(serial: str, log: Log | None = None, timeout: int = 60) -> bool:
+    """Wait for a device to come back after adbd restarts (e.g. `adb root`).
+
+    Over USB the transport re-enumerates on its own. Over Wi-Fi the socket is
+    gone and the device drops off `adb devices` entirely, so it must be
+    re-connected by address before anything else will work.
+    """
+    deadline = time.time() + timeout
+    wireless = is_wireless(serial)
+    while time.time() < deadline:
+        if wireless:
+            # ip:port can be dialled straight back; an mDNS name is re-advertised
+            # by the unit, so re-resolve it instead.
+            if ":" in serial and "_tcp" not in serial:
+                _adb(["connect", serial], None, timeout=15)
+            else:
+                ip = _mdns_ip(None)
+                if ip:
+                    _adb(["connect", ip], None, timeout=15)
+        if is_alive(serial):
+            return True
+        time.sleep(1.5)
+    if log:
+        log(f"  ✗ device {serial} did not come back within {timeout}s.")
+        if wireless:
+            log("    If the unit's IP changed, press Detect / Reconnect to find "
+                "it again, then re-run the install.")
+    return False
+
+
 def device_info(serial: str, log: Log | None = None) -> dict:
     props = {}
     cp = _adb(["shell",

@@ -1,0 +1,22 @@
+{
+  "name": "carapk-webapp",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Thin web client for Car App Installer. Holds no recipe or payload.",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "preflight": "node scripts/preflight.mjs"
+  },
+  "dependencies": {
+    "@yume-chan/adb": "^2.6.2",
+    "@yume-chan/adb-credential-web": "^2.1.0",
+    "@yume-chan/adb-daemon-webusb": "^2.3.2",
+    "@yume-chan/stream-extra": "^2.6.1"
+  },
+  "devDependencies": {
+    "vite": "^5.4.0"
+  }
+}

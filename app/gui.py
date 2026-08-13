@@ -10,7 +10,7 @@ from __future__ import annotations
 import threading
 import tkinter as tk
 
-from . import config, licensing, engine, provision, activation
+from . import config, licensing, engine, provision, activation, profiles
 
 BG = "#0f1420"; CARD = "#1b2333"; FG = "#e8ecf5"; MUTED = "#8b95a7"
 ACCENT = "#3d7bff"; OK = "#37c281"; ERR = "#ff6b6b"
@@ -23,6 +23,7 @@ class App(tk.Tk):
         self.title(f"{config.PRODUCT_NAME} {config.PRODUCT_VERSION}")
         self.configure(bg=BG); self.geometry("780x680"); self.minsize(740, 620)
         self.serial = None
+        self.profile = None          # set by _detect() once a unit is found
         self._poll_stop = False
         self.build_request()
 
@@ -161,8 +162,13 @@ class App(tk.Tk):
         self._label(top, "Approved", font=FONT_H, fg=OK).pack(side="left")
         self._label(top, f"VIN {payload.get('vin','')} · {payload.get('make','')} {payload.get('model','')}",
                     fg=MUTED).pack(side="right")
-        self._label(w, "On the head unit enable Developer options → Wireless ADB, then press Detect.",
-                    fg=MUTED, wraplength=720).pack(anchor="w", pady=(6, 10))
+        # Before detection we do not know which car this is, so name both ways in.
+        self.conn_lbl = self._label(
+            w, "Connect the head unit — FAW B70: enable Developer options → Wireless ADB. "
+               "Dongfeng MAGE: plug in a USB cable and accept the prompt on its screen. "
+               "Then press Detect.",
+            fg=MUTED, wraplength=720)
+        self.conn_lbl.pack(anchor="w", pady=(6, 10))
 
         dev = tk.Frame(w, bg=CARD); dev.pack(fill="x")
         di = tk.Frame(dev, bg=CARD); di.pack(fill="x", padx=16, pady=12)
@@ -170,10 +176,8 @@ class App(tk.Tk):
         tk.Button(di, text="Detect / Reconnect", command=self._detect_async, **self._btn()).pack(side="right")
 
         items = tk.Frame(w, bg=CARD); items.pack(fill="x", pady=(12, 6))
-        ii = tk.Frame(items, bg=CARD); ii.pack(fill="x", padx=16, pady=12)
-        self._label(ii, "Installs, in order:", fg=MUTED, bg=CARD).pack(anchor="w")
-        for s in provision.STEPS:
-            self._label(ii, f"   • {s['name']}", bg=CARD).pack(anchor="w")
+        self._items_box = tk.Frame(items, bg=CARD); self._items_box.pack(fill="x", padx=16, pady=12)
+        self._render_steps(None)
 
         self.go_btn = tk.Button(w, text="Install everything to the car",
                                 command=self._provision_async, **self._btn(primary=True))
@@ -183,6 +187,16 @@ class App(tk.Tk):
                                insertbackground=FG, relief="flat", wrap="word")
         self.log_txt.pack(fill="both", expand=True); self.log_txt.configure(state="disabled")
         self._detect_async()
+
+    def _render_steps(self, profile):
+        """List what will be installed. Before detection, show the default set."""
+        for c in self._items_box.winfo_children():
+            c.destroy()
+        title = ("Installs, in order:" if profile is None
+                 else f"{profile['name']} — installs, in order:")
+        self._label(self._items_box, title, fg=MUTED, bg=CARD).pack(anchor="w")
+        for s in provision.steps_for(profile):
+            self._label(self._items_box, f"   • {s['name']}", bg=CARD).pack(anchor="w")
 
     def log(self, msg):
         def _():
@@ -196,10 +210,17 @@ class App(tk.Tk):
     def _detect(self):
         self.serial = engine.ensure_device(self.log)
         if self.serial:
-            info = engine.device_info(self.serial, None)
-            t = f"Device: {info.get('model','?')} · Android {info.get('android','?')} (API {info.get('sdk','?')})"
+            self.profile, info = profiles.detect(self.serial, None)
+            t = (f"Device: {info.get('model','?')} · Android {info.get('android','?')} "
+                 f"(API {info.get('sdk','?')}) — {self.profile['name']}")
+            hint = self.profile.get("connect_hint", "")
             self.after(0, lambda: self.dev_lbl.configure(text=t, fg=OK))
+            self.after(0, lambda: self._render_steps(self.profile))
+            # Once the car is known, replace the both-ways text with its own.
+            if hint:
+                self.after(0, lambda: self.conn_lbl.configure(text=hint))
         else:
+            self.profile = None
             self.after(0, lambda: self.dev_lbl.configure(text="Device: not connected", fg=ERR))
 
     def _provision_async(self):
@@ -211,7 +232,8 @@ class App(tk.Tk):
         def worker():
             ok = False
             try:
-                ok = provision.provision(self.serial, self.log)
+                ok = provision.provision(self.serial, self.log,
+                                         getattr(self, "profile", None))
             finally:
                 if ok:
                     activation.mark_consumed(self._rid)

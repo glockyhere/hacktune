@@ -15,6 +15,7 @@ import sqlite3
 import threading
 import time
 
+from cryptography.exceptions import InvalidSignature
 from cryptography.hazmat.primitives.serialization import load_der_private_key
 
 _CODE_ALPHABET = "ABCDEFGHJKMNPQRSTUVWXYZ23456789"  # no I/L/O/0/1
@@ -36,6 +37,11 @@ class Store:
                  make TEXT, model TEXT, status TEXT, token TEXT,
                  delivered INTEGER DEFAULT 0, created INTEGER, approved_at INTEGER)"""
         )
+        # Added for web provisioning; ALTER is a no-op on fresh tables.
+        try:
+            self.db.execute("ALTER TABLE requests ADD COLUMN consumed INTEGER DEFAULT 0")
+        except sqlite3.OperationalError:
+            pass
         self.db.commit()
         if not signing_key_pkcs8_b64:
             raise RuntimeError("SIGNING_KEY_PKCS8 not set")
@@ -45,6 +51,47 @@ class Store:
     def _sign(self, payload: dict) -> str:
         pb = json.dumps(payload, separators=(",", ":")).encode()
         return _b64url(pb) + "." + _b64url(self._priv.sign(pb))
+
+    def verify_token(self, token: str) -> dict | None:
+        """Verify a token WE issued (same key). Returns its payload or None.
+
+        Lets the web endpoints trust a token the browser presents without the
+        browser ever holding a secret — the recipe is released only for a
+        payload this server signed and still recognises as approved.
+        """
+        try:
+            payload_b64, sig_b64 = (token or "").split(".", 1)
+            pb = base64.urlsafe_b64decode(payload_b64 + "=" * (-len(payload_b64) % 4))
+            sig = base64.urlsafe_b64decode(sig_b64 + "=" * (-len(sig_b64) % 4))
+            self._priv.public_key().verify(sig, pb)
+        except (InvalidSignature, ValueError):
+            return None
+        except Exception:
+            return None
+        try:
+            payload = json.loads(pb.decode())
+        except Exception:
+            return None
+        if payload.get("tag") != "activation":
+            return None
+        # the request must still exist, be approved, and not already consumed
+        rec = self.get(payload.get("rid", ""))
+        if not rec or rec["status"] != "approved" or rec.get("token") != token:
+            return None
+        if rec.get("consumed"):
+            return None
+        return payload
+
+    def consume(self, token: str) -> bool:
+        """Burn a token after a completed install so it cannot be reused."""
+        payload = self.verify_token(token)
+        if not payload:
+            return False
+        with _lock:
+            self.db.execute("UPDATE requests SET consumed=1 WHERE rid=?",
+                            (payload["rid"],))
+            self.db.commit()
+        return True
 
     # ---- requests --------------------------------------------------------- #
     def create(self, mid: str, vin: str, make: str, model: str) -> dict:
