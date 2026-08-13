@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" role="img" aria-label="Axolotl">
+  <title>Axolotl</title>
+  <!-- Placeholder mark: the cat motif in the interface palette (void ground,
+       lume amber). Swap for a real logo when there is one.
+       NOTE: no double hyphens anywhere in this file. XML forbids them inside
+       comments, and an invalid favicon fails silently as a blank tab icon. -->
+  <rect width="32" height="32" rx="7" fill="#121216"/>
+  <g fill="#e0b352">
+    <path d="M7 15 L9.2 4.5 L16.2 9.6 Z"/>
+    <path d="M25 15 L22.8 4.5 L15.8 9.6 Z"/>
+    <circle cx="16" cy="19.2" r="8.8"/>
+  </g>
+  <g fill="#121216">
+    <circle cx="12.6" cy="17.6" r="1.7"/>
+    <circle cx="19.4" cy="17.6" r="1.7"/>
+  </g>
+</svg>
