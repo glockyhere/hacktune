@@ -1,0 +1,167 @@
+# Production deployment — Cloudflare + custom domain
+
+The runbook for taking the web client live. Everything is driven by one file:
+`deploy/production.env`.
+
+Topology (root domain for the app, `api.` for the backend):
+
+```
+ buyer's browser
+   │
+   ├── https://example.com            Cloudflare Pages   static client (webapp/dist)
+   │        │  POST /api/request, /api/plan …
+   │        ▼
+   ├── https://api.example.com        VPS + Caddy        FastAPI activation API
+   │        │  streams APKs via expiring /dl links
+   │        ▼
+   └── https://payload.example.com    R2 custom domain   APKs, header-gated
+            (reachable only by the VPS — never by a browser)
+```
+
+The browser only ever talks to the first two. It never learns the payload host:
+`/dl` proxies through the API, so an approved session holds a link that expires
+in 15 minutes and nothing else.
+
+---
+
+## 0. Prerequisites
+
+- Cloudflare account with your domain's nameservers already delegated
+- The VPS running the activation API (see `docs/ACTIVATION_VPS.md`)
+- Node 20+ locally, for the build
+- `npx wrangler login` once, for Pages uploads
+
+## 1. Fill in the one file
+
+```bash
+cp deploy/production.env.example deploy/production.env
+nano deploy/production.env      # domain, both card numbers, telegram, price, VPS IP
+python deploy/configure.py
+```
+
+`configure.py` writes:
+
+| File | What it gets |
+|---|---|
+| `webapp/public/config.js` | API URL, both cards, telegram, price |
+| `server_vps/Caddyfile` | the API hostname to get a cert for |
+| `deploy/vps-env.generated` | env lines to **merge** into the VPS (chmod 600) |
+
+Both `deploy/production.env` and `deploy/vps-env.generated` are gitignored — they
+hold your card numbers and freshly minted secrets.
+
+## 2. Cloudflare DNS
+
+| Type | Name | Value | Proxy |
+|---|---|---|---|
+| A | `api` | your VPS IP | **DNS only (grey cloud)** |
+| CNAME | `@` | (created by Pages in step 5) | Proxied |
+| CNAME | `payload` | (created by R2 in step 3) | Proxied |
+
+> **`api` must stay grey-clouded.** Behind the orange cloud, Caddy's HTTP-01
+> challenge can't complete and TLS issuance fails. If you want it proxied later,
+> switch Caddy to a Cloudflare Origin Certificate first.
+
+## 3. Lock the payload (closes the one live security hole)
+
+Until now the APKs sat on a public `pub-*.r2.dev` bucket: anyone with a URL
+downloaded them free, so the paywall sold convenience, not access.
+
+1. **R2 → your bucket → Settings → Public access: disable** the `r2.dev` URL.
+2. **Custom domain**: attach `payload.example.com` to the bucket.
+3. **WAF rule** (Security → WAF → Custom rules) on that hostname:
+
+   ```
+   Field:  Hostname          equals    payload.example.com
+   AND     Header X-Payload-Auth   ne    <PAYLOAD_AUTH value from vps-env.generated>
+   Action: Block
+   ```
+
+   The VPS sends that header (`PAYLOAD_AUTH` in the env). A browser never does,
+   so the bucket is unreachable to the public even if the hostname leaks.
+
+4. **Upload every APK** — including the two MAGE files that were never uploaded:
+
+   ```bash
+   # 01–05 = FAW B70,  df01–df02 = Dongfeng MAGE
+   npx wrangler r2 object put <bucket>/df01_freetube.apk   --file payload/df01_freetube.apk
+   npx wrangler r2 object put <bucket>/df02_yandexnavi.apk --file payload/df02_yandexnavi.apk
+   ```
+
+5. Confirm the gate works — the first must fail, the second succeed:
+
+   ```bash
+   curl -sI https://payload.example.com/df01_freetube.apk | head -1          # expect 403
+   curl -sI -H "X-Payload-Auth: <secret>" https://payload.example.com/df01_freetube.apk | head -1   # expect 200
+   ```
+
+## 4. VPS: ship the CORS fix and the payload settings
+
+The API currently sends **no CORS headers**, so a browser client fails every call
+with `Load failed`. The desktop app never hit this because it isn't a browser.
+
+```bash
+cd /opt/carapk/src && sudo git pull
+
+sudo nano /etc/carapk/activation.env     # merge in deploy/vps-env.generated
+# keep SIGNING_KEY_PKCS8 / TG_BOT_TOKEN / TG_CHAT_ID exactly as they are
+
+sudo cp server_vps/Caddyfile /etc/caddy/Caddyfile
+sudo systemctl reload caddy
+sudo systemctl restart carapk-activation
+```
+
+Verify CORS is live (this is the check that proves the web client will work):
+
+```bash
+curl -s -i -X OPTIONS https://api.example.com/api/request \
+  -H "Origin: https://example.com" \
+  -H "Access-Control-Request-Method: POST" | grep -i access-control-allow-origin
+```
+
+Expect `access-control-allow-origin: https://example.com`. No header = the old
+build is still running.
+
+## 5. Build and publish the client
+
+```bash
+cd webapp
+npm ci
+npm run build          # bundles ya-webadb into dist/assets/transport-*.js
+npm run preflight      # refuses to ship placeholder cards / http API
+npx wrangler pages deploy dist --project-name carapk
+```
+
+Then in Pages → Custom domains, add `example.com`.
+
+`npm run preflight` is not optional: `config.js` is hand-editable and public, so
+it is exactly the file most likely to go live still saying `YOUR NAME`.
+
+## 6. Verify the live site
+
+- [ ] `https://example.com` loads, cat animates, VIN accepts 17 characters
+- [ ] **Request activation** returns a code (proves DNS + TLS + CORS)
+- [ ] Telegram bot receives the request; approving flips the page to the install step
+- [ ] **Connect** opens the Chrome WebUSB chooser (proves the ADB bundle shipped)
+- [ ] `curl` on the payload host without the header returns 403
+- [ ] `python verify_cloud.py` passes for all 7 APKs
+
+---
+
+## What is verified, and what is not
+
+**Verified in this repo:** the production bundle builds and loads real ya-webadb
+(`connectUsb` / `connectRelay` resolve at runtime); the request → await flow runs
+end to end against a CORS-patched backend; the recipe guard
+(`python check_recipe.py`) shows desktop and web recipes agree; preflight catches
+every placeholder.
+
+**Not verified — needs a car:** no ADB session has ever been driven from the
+browser. `transport.js` was rewritten against the real ya-webadb 2.x API (the
+previous version called three methods that do not exist and imported a package
+that was never published), but the USB and relay paths have not touched hardware.
+Budget one session with a MAGE on a USB cable before selling.
+
+**Also outstanding:** the desktop `.exe` flow has never been replayed end to end
+either (`CLAUDE.md` TODO), and `nip.io` stays in `app/config.py` until you point
+the desktop app at the new API host too.
