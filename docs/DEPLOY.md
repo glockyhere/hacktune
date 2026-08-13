@@ -100,6 +100,17 @@ downloaded them free, so the paywall sold convenience, not access.
 The API currently sends **no CORS headers**, so a browser client fails every call
 with `Load failed`. The desktop app never hit this because it isn't a browser.
 
+> **Check the port before copying the Caddyfile.** On this VPS `8080` is already
+> held by an unrelated `node` process, so the activation service listens on
+> **8081**. Copying a Caddyfile that says `8080` would silently proxy every
+> activation to that other service. Confirm they agree:
+>
+> ```bash
+> ss -lntp | grep -E '8080|8081'                      # who owns what
+> systemctl cat carapk-activation | grep ExecStart    # --port must match
+> grep reverse_proxy /etc/caddy/Caddyfile
+> ```
+
 ```bash
 cd /opt/carapk/src && sudo git pull
 
@@ -107,6 +118,7 @@ sudo nano /etc/carapk/activation.env     # merge in deploy/vps-env.generated
 # keep SIGNING_KEY_PKCS8 / TG_BOT_TOKEN / TG_CHAT_ID exactly as they are
 
 sudo cp server_vps/Caddyfile /etc/caddy/Caddyfile
+sudo caddy validate --config /etc/caddy/Caddyfile   # never reload a bad config
 sudo systemctl reload caddy
 sudo systemctl restart carapk-activation
 ```
