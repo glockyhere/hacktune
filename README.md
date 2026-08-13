@@ -1,8 +1,16 @@
 # Car Head-Unit Setup — single paywalled Windows program
 
-One `.exe` that provisions an ECARX/FAW head unit with our exact set, in the
-exact order we did it by hand. The buyer only enables **Wireless ADB**; the
-program does everything else.
+One `.exe` that provisions a car head unit with our exact set, in the exact
+order we did it by hand. The buyer only enables **Wireless ADB**; the program
+does everything else.
+
+**Supported head units** — auto-detected, each with its own payload and unlock
+(see [`app/profiles.py`](app/profiles.py)):
+
+| Unit | Android | How it is unlocked |
+|---|---|---|
+| FAW B70 (ECARX) | 9 / API 28 | payload pre-signed with the AOSP platform key its `apkauth` whitelist demands; menu via a patched launcher |
+| Dongfeng Aeolus MAGE | 11 / API 30 | clears `persist.apk.sign.verify` (nothing is signed); menu via rows written into the launcher's SQLite `allApp` table — see [`docs/DONGFENG_MAGE.md`](docs/DONGFENG_MAGE.md) |
 
 **Activation model:** each install is a one-time, **pay-then-you-approve**
 session. The buyer enters VIN + make/model, sees your card + contacts, and waits
@@ -34,7 +42,7 @@ is **adb**.
 ### Cloud payload
 The APKs are **not** bundled in the exe. The program **downloads them from your
 cloud every run** (`config.APK_BASE_URL`) and verifies each file's **SHA-256**
-against a value pinned in `app/provision.py` before installing — a tampered or
+against a value pinned in `app/profiles.py` before installing — a tampered or
 wrong download is rejected. This keeps the exe small (~15 MB) and lets you update
 the payload without reshipping the program. Upload the files in `payload/` to any
 static host — see [`payload/UPLOAD.md`](payload/UPLOAD.md).
@@ -48,12 +56,15 @@ CarApkInstaller/
 ├─ app/                  the program (paywall + fixed provisioning flow)
 │  ├─ config.py          ← EDIT: your card, contacts, price, license public key
 │  ├─ licensing.py       Ed25519 license verify + machine-id binding
-│  ├─ provision.py       the exact ordered install + post-steps
+│  ├─ profiles.py        ← per-car payload + unlock + detection (ADD CARS HERE)
+│  ├─ provision.py       generic download→verify→install→post loop
 │  ├─ engine.py          adb connect / mDNS reconnect
 │  └─ gui.py             paywall + one “Install everything” button
-├─ payload/              the 5 pre-signed/patched APKs (bundled into the exe)
+├─ payload/              the APKs per car (hosted on your cloud, not bundled)
 ├─ keygen/               ★ SELLER-ONLY. Never ship. (make + issue license keys)
 ├─ tools/fetch_tools.ps1 downloads adb
+├─ tools/restyle_icon.py rebuild MAGE-styled launcher icons
+├─ docs/DONGFENG_MAGE.md the MAGE unlock, menu DB, icon spec + traps
 ├─ build/CarApkInstaller.spec
 ├─ build.bat
 └─ requirements.txt

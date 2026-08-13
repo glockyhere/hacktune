@@ -5,15 +5,26 @@ project is, what's already done and *verified live*, and what's left. The next
 work is **GUI polish + minor details** — see "TODO" at the bottom.
 
 ## What this is
-`CarApkInstaller` — a paywalled Windows program that provisions a specific
-ECARX/FAW **car head unit** (Android 9 / API 28, ARM) over **Wireless ADB**. One
-button installs a fixed set of apps and enables everything they need. Each install
-is a **pay → seller approves → one-time activation** session.
+`CarApkInstaller` — a paywalled Windows program that provisions **car head units**
+over **Wireless ADB**. One button installs a fixed set of apps and enables
+everything they need. Each install is a **pay → seller approves → one-time
+activation** session.
 
-The head unit only accepts apps signed with the **AOSP platform key** (its
-`apkauth` whitelist). All payload APKs are pre-signed with that key (and Yandex
-Navi is pre-patched to survive re-signing), so the program just `adb install`s
-them — no signing at runtime.
+Two units are supported. The unit is auto-detected and the matching profile in
+`app/profiles.py` drives the payload and all post-install work:
+
+- **FAW B70 (ECARX)** — Android 9 / API 28. Only accepts apps signed with the
+  **AOSP platform key** (its `apkauth` whitelist). All payload APKs are
+  pre-signed with that key (and Yandex Navi is pre-patched to survive
+  re-signing), so the program just `adb install`s them — no signing at runtime.
+  The menu is handled by shipping a patched launcher.
+- **Dongfeng Aeolus MAGE** — Android 11 / API 30. Completely different lock: the
+  OEM PackageManager rejects foreign certs with `DF APK cert incorrect`, gated by
+  the property `persist.apk.sign.verify`. The unit is userdebug with root adb, so
+  the installer **clears the property instead of signing anything**. Its launcher
+  renders a fixed list from a SQLite table, so installed apps stay invisible
+  until the installer writes rows into `allApp`. Full details and the traps:
+  **`docs/DONGFENG_MAGE.md` — read it before touching that profile.**
 
 ## Architecture (3 pieces, all built)
 1. **Desktop app** (`app/`, Python + tkinter) — the product buyers run.
@@ -37,6 +48,11 @@ them — no signing at runtime.
 - **On-device install proven manually** (each `adb install` / permission / launcher
   step succeeded on the real unit). NOT yet replayed *through the exe* end-to-end
   because the car has been offline — that's the only uncertified last mile.
+- **Dongfeng MAGE profile proven manually on a real unit (2026-08-13)**:
+  property unlock → both APKs install → menu rows added → both tiles appear at
+  native 120px size and launch; survives a launcher + SystemUI restart. Verified
+  over **USB**, which is exactly how the MAGE is provisioned in the field (the
+  B70 is the wireless one). Same last-mile gap: not yet replayed through the exe.
 
 ## Repo layout
 ```
@@ -44,19 +60,34 @@ app/
   config.py      ← seller edits: card, contacts, price, ACTIVATION_URL/KEY, R2 URL
   gui.py         ← tkinter UI (request → wait-for-approval → installer). MAIN GUI FILE.
   activation.py  ← activation client (submit/poll/verify one-time token)
-  provision.py   ← the fixed install flow + post-steps (STEPS list + sha256 pins)
+  profiles.py    ← PER-CAR profiles: payload + unlock + post-steps + detection.
+                   ADD NEW HEAD UNITS HERE, not in provision.py.
+  provision.py   ← generic download→verify→install→post loop, driven by a profile
   engine.py      ← adb: device detect, Wi-Fi/mDNS reconnect, install
   download.py    ← cloud downloader with SHA-256 verify
   licensing.py   ← machine_id() (used by activation) + old offline-license verify (legacy)
 keygen/          ← SELLER-ONLY tools. generate_activation_keys.py makes the signing
                    keypair (private → VPS secret; public → config.py). NEVER commit keys.
 server_vps/      ← the deployed backend (store.py, telegram.py, main.py, systemd, Caddy)
+                   plan.py = server-issued recipe + signed download URLs (web client)
 server/          ← Cloudflare Worker alternative (not used; kept for reference)
+webapp/          ← WEB client (thin, holds no recipe/payload/key). See docs/WEBAPP.md
+                   Vite build: `npm ci && npm run build && npm run preflight`.
+                   public/ is copied verbatim (config.js stays hand-editable
+                   after deploy); transport.js is the only bare-specifier file
+                   and lands in its own lazily-loaded chunk.
+deploy/          ← production.env(.example) + configure.py: ONE file drives the
+                   domain, cards, Caddyfile and VPS env. See docs/DEPLOY.md
+agent/           ← relay.py: localhost WebSocket↔:5555 bridge for WIRELESS cars (B70)
 payload/         ← UPLOAD.md only; the *.apk are gitignored and live on R2
+                   01–05 = FAW B70;  df01–df02 = Dongfeng MAGE
 tools/           ← fetch_tools.ps1 downloads adb; adb itself is gitignored
+                   restyle_icon.py = rebuild MAGE-styled launcher icons
 build/           ← PyInstaller spec
-docs/            ← CLOUD_R2.md, ACTIVATION_VPS.md (deploy guides), ACTIVATION.md (Worker)
+docs/            ← CLOUD_R2.md, ACTIVATION_VPS.md, ACTIVATION.md, DONGFENG_MAGE.md,
+                   WEBAPP.md (web client architecture + honest security boundary)
 verify_cloud.py  ← checks R2 serves every APK with the right hash
+check_recipe.py  ← guards app/profiles.py vs server_vps/plan.py from drifting
 main.py, build.bat, requirements.txt, README.md
 ```
 
@@ -86,11 +117,37 @@ build.bat            :: -> dist\CarApkInstaller.exe  (+ dist\tools\)
   test (see git history / the console tests) before shipping.
 - **Never commit secrets or binaries.** `.gitignore` blocks `*.apk`,
   `keygen/license_private.key`, `server_vps/*.env`, `*.db`. Keep it that way.
-- **Payload hashes are pinned** in `provision.py` (`STEPS[*].sha256`). If an APK is
-  ever re-built, re-upload to R2 AND update the pin, or the app will (correctly)
-  reject it.
-- **Wireless ADB IP changes** on the unit between sessions; `engine.ensure_device`
+- **Payload hashes are pinned** in `profiles.py` (`FAW_STEPS`/`DF_STEPS[*].sha256`).
+  If an APK is ever re-built, re-upload to R2 AND update the pin, or the app will
+  (correctly) reject it.
+- **Never `am force-stop com.dftc.launcher`** on the Dongfeng. It desyncs
+  SystemUI's CarStatusBar and kills the hardware app-menu button until SystemUI
+  is restarted. Reload the menu by pulsing `show_launcher_test_app_key` instead —
+  `profiles._df_finish` already does. Full explanation in `docs/DONGFENG_MAGE.md`.
+- **Never re-sign Yandex Navi for the Dongfeng.** `com.yandex.passport` verifies
+  its own signature and crash-loops with `application signature mismatch`. The
+  MAGE payload ships it pristine. (The FAW copy is patched around this; reusing
+  that patched build on a MAGE is an untested idea, noted in the doc.)
+- **The recipe lives twice** now: `app/profiles.py` (desktop) and
+  `server_vps/plan.py` (web — the browser must carry none of it). Run
+  `python check_recipe.py` after editing either; it fails on hash/flag drift.
+- **The web client must stay dumb.** Never hardcode packages, properties, the
+  launcher DB layout, or payload URLs in `webapp/`. Those come from `/api/plan`
+  per approved session. The whole security argument is "the client holds nothing
+  worth stealing" — see `docs/WEBAPP.md`. Obscurity is NOT the protection.
+- **Payload must be gated.** The web `/dl` flow assumes a PRIVATE origin
+  (`PAYLOAD_ORIGIN`); the old public `pub-*.r2.dev` bucket lets anyone download
+  the APKs free. Make the bucket private before selling.
+- **Connection per car:** FAW B70 is **always Wireless ADB**; Dongfeng MAGE is
+  **always a USB cable**. Each profile in `profiles.py` carries `connection` and
+  `connect_hint`, and the GUI shows the right instruction once the car is known.
+- **Wireless ADB IP changes** on the B70 between sessions; `engine.ensure_device`
   already re-discovers via `adb mdns services`. Keep that behavior.
+- **`adb root` restarts adbd**, which would drop a wireless link (the B70). The
+  MAGE unlock needs root but runs over USB, where the transport just
+  re-enumerates. `profiles._df_ensure_root` still skips `adb root` when adbd is
+  already root (it is, on the MAGE) and otherwise waits via `engine.reconnect()`,
+  so it is safe either way — don't reintroduce a bare `adb root; wait-for-device`.
 - **One uvicorn worker only** on the VPS (single process owns the Telegram poller +
   SQLite). Don't add workers.
 - **nip.io is temporary DNS.** Before real sales, move to the seller's own domain
@@ -125,6 +182,30 @@ GUI lives in `app/gui.py`. Style tokens (colors/fonts) are at the top. Suggested
       install is marked consumed). `activation.mark_consumed`/`is_consumed` exist.
 - [ ] **Certify the last mile:** when a head unit is available, run the whole flow
       through the built exe once (request→approve→download→install) and note it here.
+- [ ] **Upload the MAGE payload to R2** — `df01_freetube.apk`, `df02_yandexnavi.apk`
+      are staged in `payload/` but NOT yet uploaded; `verify_cloud.py` will fail on
+      them until they are. See `payload/UPLOAD.md` and `docs/DEPLOY.md` step 3.
+- [ ] **Web client — validate the ADB transport on hardware.** This is now the
+      LAST functional unknown. The bundle itself is fixed and proven: `npm run
+      build` produces `dist/assets/transport-*.js` with real ya-webadb in it, and
+      `connectUsb`/`connectRelay` resolve at runtime (verified in-browser). But no
+      ADB session has ever been driven from a browser. Try MAGE over USB first
+      (pure WebUSB, nothing to install), then B70 with `agent/relay.py`.
+- [ ] **Deploy to the custom domain** — `docs/DEPLOY.md` is the runbook. Fill
+      `deploy/production.env`, run `python deploy/configure.py`, then follow it.
+      The VPS still runs the pre-CORS build, so the web client fails every call
+      with "Load failed" until step 4 of that doc is done.
+- [ ] **Make the payload bucket PRIVATE.** Still the one live security hole: the
+      origin is a public `pub-*.r2.dev` bucket, so the APKs are downloadable free.
+      The server side is ready (`PAYLOAD_ORIGIN` + the new `PAYLOAD_AUTH` secret
+      header); it needs the Cloudflare side doing — `docs/DEPLOY.md` step 3.
+- [ ] **B70 over wireless (already the field setup):** re-confirm the ~100 MB
+      Navi push survives a Wi-Fi drop mid-install now that provision.py re-checks
+      the transport and reconnects before each push. MAGE is USB — no such gap.
+- [ ] **Optional, MAGE:** try the FAW's patched `04_yandexnavi.apk` on a MAGE. If
+      it survives (no `signature mismatch` in `logcat -b crash`), it can be
+      restyled with `tools/restyle_icon.py` and Yandex gets its real yellow-arrow
+      icon instead of the OEM `icon_allapp_navi` tile.
 
 ## Handy references
 - Deploy the backend: `docs/ACTIVATION_VPS.md`

@@ -21,6 +21,14 @@ tools/platform-tools/
 tools/build-tools/
 tools/jre/
 
+# --- web client build artifacts -----------------------------------------------
+webapp/node_modules/
+webapp/dist/
+
+# --- production deployment: real domain, cards and generated secrets ----------
+deploy/production.env
+deploy/vps-env.generated
+
 # --- os junk ------------------------------------------------------------------
 .DS_Store
 Thumbs.db
