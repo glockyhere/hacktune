@@ -14,8 +14,8 @@
 // Variables (set these in the Pages dashboard):
 //   CARAPK_API            https://api.yourdomain.com      (required to trigger)
 //   CARAPK_CARD_1_BRAND   UZCARD
+//   (no holder: the name is not shown in the UI, so it is never published)
 //   CARAPK_CARD_1_NUMBER  8600 ...
-//   CARAPK_CARD_1_HOLDER  YOUR NAME
 //   CARAPK_CARD_2_*       same shape, optional
 //   CARAPK_TELEGRAM       @handle
 //   CARAPK_PRICE_TEXT     200 000 so'm
@@ -39,7 +39,6 @@ const cards = [1, 2]
   .map((n) => ({
     brand: (env[`CARAPK_CARD_${n}_BRAND`] || "").trim(),
     number: (env[`CARAPK_CARD_${n}_NUMBER`] || "").trim(),
-    holder: (env[`CARAPK_CARD_${n}_HOLDER`] || "").trim(),
   }))
   .filter((c) => c.number);
 
@@ -59,7 +58,7 @@ window.CARAPK = {
 
   PAYMENT: {
     cards: [
-${cards.map((c) => `      { brand: ${q(c.brand)}, number: ${q(c.number)}, holder: ${q(c.holder)} }`).join(",\n")},
+${cards.map((c) => `      { brand: ${q(c.brand)}, number: ${q(c.number)} }`).join(",\n")},
     ],
   },
   CONTACTS: {

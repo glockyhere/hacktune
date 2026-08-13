@@ -11,8 +11,8 @@ window.CARAPK = {
 
   PAYMENT: {
     cards: [
-      { brand: "UZCARD", number: "8600 0000 0000 0000", holder: "YOUR NAME" },
-      { brand: "HUMO",   number: "9860 0000 0000 0000", holder: "YOUR NAME" },
+      { brand: "UZCARD", number: "8600 0000 0000 0000" },
+      { brand: "HUMO",   number: "9860 0000 0000 0000" },
     ],
   },
   CONTACTS: {

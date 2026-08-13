@@ -76,11 +76,10 @@ def main() -> None:
         cards.append({
             "brand": env.get(f"CARD_{n}_BRAND", "").strip() or f"CARD {n}",
             "number": number,
-            "holder": env.get(f"CARD_{n}_HOLDER", "").strip(),
         })
     if not cards:
         sys.exit("no cards filled in — buyers would have nothing to pay to "
-                 "(set CARD_1_NUMBER / CARD_1_HOLDER)")
+                 "(set CARD_1_NUMBER)")
 
     telegram = require(env, "TELEGRAM", "buyers need somewhere to send the code")
     price = require(env, "PRICE_TEXT", "the cheque would print nothing")
@@ -91,8 +90,7 @@ def main() -> None:
 
     # --- webapp/public/config.js -------------------------------------------
     card_lines = ",\n".join(
-        f"      {{ brand: {js_str(c['brand'])}, number: {js_str(c['number'])}, "
-        f"holder: {js_str(c['holder'])} }}" for c in cards
+        f"      {{ brand: {js_str(c['brand'])}, number: {js_str(c['number'])} }}" for c in cards
     )
     config_js = f'''// Public config for the web client. Nothing here is secret — it is served to
 // every visitor. The recipe and payload URLs are NOT here; the server issues

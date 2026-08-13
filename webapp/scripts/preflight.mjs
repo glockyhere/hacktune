@@ -51,7 +51,6 @@ cards.forEach((c, i) => {
   if (!digits) errors.push(`${where}: number is empty`);
   else if (digits.length < 16) errors.push(`${where}: number has ${digits.length} digits, expected 16`);
   else if (/^(\d)\1+$/.test(digits.slice(4))) errors.push(`${where}: number is a placeholder (${c.number})`);
-  if (!c.holder || /YOUR NAME/i.test(c.holder)) errors.push(`${where}: holder is a placeholder (${c.holder || "empty"})`);
 });
 
 // --- contacts + price -----------------------------------------------------

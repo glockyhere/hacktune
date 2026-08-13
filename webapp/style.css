@@ -320,7 +320,11 @@ body {
   transition: transform 0.6s cubic-bezier(0.34,1.56,0.64,1), z-index 0s;
   animation: slideIntoPocket 0.8s cubic-bezier(0.2,0.8,0.2,1) backwards;
 }
-.card-inner { display: flex; flex-direction: column; justify-content: space-between; height: 100%; }
+.card-inner {
+  display: flex; flex-direction: column; height: 100%;
+  justify-content: flex-start; gap: 11px;   /* NOT space-between: only the
+     top ~60px of the card clears the pocket, so both rows must live there */
+}
 .card-top {
   display: flex; justify-content: space-between; align-items: center;
   font: 600 13px/1 var(--mono); letter-spacing: 0.05em; text-transform: uppercase;
@@ -333,9 +337,6 @@ body {
 .card-pan { align-self: stretch; }
 .hidden-stars { display: block; font: 500 12px/1 var(--mono); letter-spacing: 0.02em; white-space: nowrap; }
 .card-number { display: none; font: 600 12px/1 var(--mono); letter-spacing: 0.01em; white-space: nowrap; }
-.card-foot { display: flex; flex-direction: column; }
-.card-foot .label { margin-bottom: 3px; font-size: 8px; letter-spacing: 0.16em; opacity: 0.6; text-transform: uppercase; }
-.card-foot .value { font: 600 10px/1 var(--mono); letter-spacing: 0.03em; }
 
 /* pure-white faces (per request); brand hue kept only in the label/ink */
 .card.uzcard { background: #ffffff; color: #1a2b52; }
@@ -376,6 +377,7 @@ body {
   display: flex; flex-direction: column; gap: 9px;
   padding: 24px 18px 16px; border: none; text-align: left; cursor: pointer;
   background: var(--paper); color: var(--ink); border-radius: 0 0 5px 5px;
+  text-decoration: none;   /* it is an <a> now, not a button */
   /* tear-off perforation: half-circle punch-outs along the top edge only */
   -webkit-mask: radial-gradient(circle 5px at 9px 0, #0000 5px, #000 5.4px) 0 0 / 18px 100% repeat-x;
           mask: radial-gradient(circle 5px at 9px 0, #0000 5px, #000 5.4px) 0 0 / 18px 100% repeat-x;
@@ -385,15 +387,19 @@ body {
 .cheque-body:active { transform: translateY(-1px); }
 .cheque-label  { font: 500 11px/1 var(--mono); letter-spacing: 0.22em; text-transform: uppercase; color: var(--muted); }
 .cheque-amount { font: 600 18px/1.1 var(--mono); letter-spacing: 0; color: var(--ink); white-space: nowrap; }
+.cheque-cta { text-decoration: underline; text-underline-offset: 3px; }
+.cheque-arrow { transition: transform var(--med); }
+.cheque-body:hover .cheque-arrow { transform: translateX(3px); }
+.cheque-body[aria-disabled="true"] { pointer-events: none; opacity: 0.55; }
 .cheque-foot {
   margin-top: auto; padding-top: 11px; border-top: 1px dashed var(--rule);
   display: flex; align-items: center; gap: 6px;
-  font: 500 11px/1 var(--mono); letter-spacing: 0.14em; text-transform: uppercase; color: var(--muted);
+  font: 500 10px/1 var(--mono); letter-spacing: 0.06em; text-transform: uppercase;
+  color: var(--muted); white-space: nowrap;
 }
-.cheque-done { display: none; color: #2f7d3f; }        /* muted green, not neon */
-.cheque-body.copied .cheque-hint { display: none; }
-.cheque-body.copied .cheque-done { display: inline; }
-@media (prefers-reduced-motion: reduce) { .cheque-body { transition: none; } }
+@media (prefers-reduced-motion: reduce) {
+  .cheque-body, .cheque-arrow { transition: none; }
+}
 
 .pay-meta {
   margin-top: 30px; display: flex; justify-content: space-between; align-items: center;

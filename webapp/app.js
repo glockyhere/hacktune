@@ -120,7 +120,6 @@ function fillCard(slot, c) {
   const full = c.number || "";
   const last4 = full.replace(/\s+/g, "").slice(-4);
   const set = (id, v) => { const el = $(id); if (el) el.textContent = v; };
-  set(slot + "-holder", c.holder || "");
   set(slot + "-mask", "•••• •••• •••• " + last4);
   set(slot + "-number", full);
 }
@@ -136,17 +135,18 @@ document.querySelectorAll(".card[data-card]").forEach((card) => {
   });
 });
 
-// The cheque copies the amount on tap; a calm "✓ Copied" swaps in without ever
-// hiding the amount, then reverts.
+// The cheque is a link out to the seller's Telegram, where the buyer sends the
+// payment receipt. Built from CONTACTS.telegram so there is no hardcoded handle;
+// if it is missing the link is disabled rather than pointing somewhere wrong.
 {
-  const paper = $("receipt-paper");
-  if (paper) paper.addEventListener("click", async () => {
-    const amt = ($("receipt-amount")?.textContent || "");
-    try { await navigator.clipboard.writeText(amt); } catch { /* clipboard blocked */ }
-    paper.classList.add("copied");
-    announce("Amount copied.");
-    setTimeout(() => paper.classList.remove("copied"), 1600);
-  });
+  const dm = $("receipt-dm");
+  const handle = String(con.telegram || "").trim().replace(/^@/, "");
+  if (dm && handle) {
+    dm.href = "https://t.me/" + encodeURIComponent(handle);
+  } else if (dm) {
+    dm.removeAttribute("href");
+    dm.setAttribute("aria-disabled", "true");
+  }
 }
 
 // --- vehicle selector ------------------------------------------------------

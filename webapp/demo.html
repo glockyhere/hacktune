@@ -91,7 +91,6 @@
                 <span class="hidden-stars" id="uz-mask">•••• •••• •••• ••••</span>
                 <span class="card-number" id="uz-number">—</span>
               </div>
-              <div class="card-foot"><span class="label">Holder</span><span class="value" id="uz-holder">—</span></div>
             </div>
           </div>
           <div class="pocket" aria-hidden="true">
@@ -111,7 +110,6 @@
                 <span class="hidden-stars" id="humo-mask">•••• •••• •••• ••••</span>
                 <span class="card-number" id="humo-number">—</span>
               </div>
-              <div class="card-foot"><span class="label">Holder</span><span class="value" id="humo-holder">—</span></div>
             </div>
           </div>
           <div class="pocket" aria-hidden="true">
@@ -125,14 +123,15 @@
         <!-- serious payment stub (not a coupon): amount always shown, real
              tear-off perforation, calm copy confirmation. No wiggle/pull. -->
         <div class="cheque">
-          <button class="cheque-body" id="receipt-paper" type="button" aria-label="Amount due, tap to copy">
+          <a class="cheque-body" id="receipt-dm" href="#" target="_blank" rel="noopener noreferrer"
+             aria-label="Send your payment receipt on Telegram">
             <span class="cheque-label">Amount due</span>
             <span class="cheque-amount" id="receipt-amount">—</span>
             <span class="cheque-foot">
-              <span class="cheque-hint">Tap to copy</span>
-              <span class="cheque-done" aria-hidden="true">✓ Copied</span>
+              <span class="cheque-cta">DM your receipt</span>
+              <span class="cheque-arrow" aria-hidden="true">→</span>
             </span>
-          </button>
+          </a>
         </div>
 
       </div>
