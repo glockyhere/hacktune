@@ -1,0 +1,508 @@
+/* =========================================================================
+   Car·APK — one machine, five states.
+   A single readout that morphs: VIN slots -> code -> percent -> seal | halt.
+   Costume removed: no registration marks, no glow, no gradient ticks.
+   Detail comes from real telemetry and structure, not applied ornament.
+
+   CONTRAST CONTRACT (measured sRGB, WCAG 2.1):
+     --etch    1.26:1  decorative dividers ONLY (exempt from 1.4.11)
+     --edge    3.4:1   every affordance: input bodies, control borders, states
+     --ink-3   5.3:1   micro labels and neutral status  (was 4.0:1, failed)
+     --ink-2   9.2:1   secondary text
+     --ink    17.3:1   the readout
+   Nothing below 11px carries meaning.
+   ========================================================================= */
+
+@import "/vendor/fonts.css";   /* self-hosted; resolves with no bundler */
+
+:root {
+  --void:   oklch(0.145 0.006 250);
+  --ground: oklch(0.185 0.006 250);
+
+  --etch:   oklch(0.275 0.007 250);   /* decorative rules only */
+  --edge:   oklch(0.520 0.008 250);   /* affordances: >=3:1 */
+  --edge-hi:oklch(0.620 0.008 250);
+
+  --ink:    oklch(0.975 0.003 250);
+  --ink-2:  oklch(0.760 0.006 250);
+  --ink-3:  oklch(0.630 0.007 250);   /* lifted from 0.560 */
+
+  --lume:   oklch(0.845 0.145 82);
+  --lume-2: oklch(0.72 0.11 82);
+  --pass:   oklch(0.86 0.12 155);
+  --stop:   oklch(0.72 0.17 26);
+
+  --mono: "Martian Mono", ui-monospace, "SF Mono", Menlo, monospace;
+  --grot: "Archivo Variable", "Archivo", system-ui, sans-serif;
+
+  --ease: cubic-bezier(0.16, 1, 0.3, 1);
+  --slow: 560ms var(--ease);
+  --med:  260ms var(--ease);
+}
+
+* { box-sizing: border-box; margin: 0; }
+[hidden] { display: none !important; }
+.sr-only {
+  position: absolute; width: 1px; height: 1px;
+  overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap;
+}
+
+body {
+  background: var(--void);
+  color: var(--ink-2);
+  font: 400 17px/1.55 var(--grot);
+  min-height: 100vh;
+  display: grid; place-items: center;
+  padding: 24px;
+  -webkit-font-smoothing: antialiased;
+}
+::selection { background: oklch(0.845 0.145 82 / 0.22); }
+:focus-visible { outline: 2px solid var(--lume); outline-offset: 3px; }
+
+.stage { width: 100%; max-width: 880px; display: flex; flex-direction: column; gap: 34px; }
+
+/* ---- machine ----------------------------------------------------------- */
+.frame {
+  position: relative;
+  background: var(--ground);
+  border: 1px solid var(--edge);
+  padding: 40px 36px 30px;
+}
+
+/* progress scale: plain track + fill. no ticks, no glow. */
+.scale {
+  position: absolute; top: 0; left: 0; right: 0; height: 2px;
+  background: var(--etch);
+}
+.scale-fill {
+  display: block; height: 100%; width: 0%;
+  background: var(--lume);
+  transition: width var(--slow);
+}
+
+/* label ABOVE the readout, adjacent to its target */
+.corelabel {
+  display: flex; justify-content: space-between; align-items: baseline;
+  font: 500 13px/1 var(--mono); letter-spacing: 0.18em; color: var(--ink-3);
+  padding-bottom: 18px;
+}
+.corelabel i { font-style: normal; letter-spacing: 0.08em; }
+.stage[data-phase="await"]   .corelabel i,
+.stage[data-phase="install"] .corelabel i { color: var(--lume-2); }
+
+.core { position: relative; min-height: 172px; display: grid; place-items: center; }
+.layer {
+  grid-area: 1 / 1; position: relative;
+  display: grid; place-items: center; width: 100%;
+  opacity: 0; transform: scale(0.97); filter: blur(4px);
+  pointer-events: none;
+  transition: opacity var(--med), transform var(--med), filter var(--med);
+}
+.stage[data-phase="request"] .layer--vin,
+.stage[data-phase="await"]   .layer--code,
+.stage[data-phase="install"] .layer--run,
+.stage[data-phase="done"]    .layer--seal,
+.stage[data-phase="halt"]    .layer--halt {
+  opacity: 1; transform: none; filter: none; pointer-events: auto;
+  transition-duration: var(--slow);
+}
+
+/* --- VIN: 17 positions with real bodies --- */
+.vin-capture {
+  position: absolute; inset: 0; width: 100%; height: 100%;
+  opacity: 0; border: 0; background: transparent;
+  cursor: text; font-size: 16px;   /* prevents iOS focus-zoom */
+}
+.slots { display: grid; grid-template-columns: repeat(17, 1fr); gap: 5px; width: 100%; pointer-events: none; }
+.slot {
+  position: relative; aspect-ratio: 1 / 1.7;
+  display: grid; place-items: center;
+  background: oklch(0.215 0.006 250);          /* a real body, not just a rule */
+  border-bottom: 1px solid var(--edge);
+  font: 500 clamp(13px, 1.9vw, 26px)/1 var(--mono);
+  color: var(--ink);
+  transition: border-color var(--med), background var(--med);
+}
+.slot::after {                                  /* countable when empty */
+  content: "·"; color: var(--ink-3); font-size: 14px;
+}
+.slot.on::after { content: none; }
+.slot.on { border-bottom-color: var(--edge-hi); }
+.layer--vin:focus-within .slot { background: oklch(0.235 0.006 250); }
+.slot.cursor { border-bottom-color: var(--lume); background: oklch(0.255 0.008 250); }
+.slot.cursor::before {
+  content: ""; position: absolute; bottom: -1px; left: 0; right: 0; height: 2px;
+  background: var(--lume);
+}
+@media (prefers-reduced-motion: no-preference) {
+  .layer--vin:focus-within .slot.cursor::before { animation: caret 1.1s steps(1) infinite; }
+  @keyframes caret { 50% { opacity: 0.25; } }
+}
+
+.hint {
+  margin-top: 22px; font: 400 15px/1.45 var(--grot); color: var(--ink-3);
+}
+.stage:not([data-phase="request"]) .hint { visibility: hidden; }
+
+/* --- code --- */
+.code { font: 700 clamp(46px, 7.4vw, 96px)/1 var(--mono); letter-spacing: 0.16em; text-indent: 0.16em; color: var(--ink); }
+
+/* --- percent --- */
+.layer--run { align-items: baseline; justify-content: center; grid-auto-flow: column; gap: 6px; }
+.pct { font: 300 clamp(76px, 14vw, 176px)/0.84 var(--mono); letter-spacing: -0.04em; font-variant-numeric: tabular-nums; color: var(--ink); }
+.pct-mark { font: 500 20px/1 var(--mono); color: var(--ink-3); align-self: flex-start; margin-top: 8px; }
+
+/* --- seal / halt --- */
+.seal {
+  width: 110px; height: 110px; display: grid; place-items: center;
+  border: 1px solid var(--pass); border-radius: 50%; font-size: 38px; color: var(--pass);
+}
+@media (prefers-reduced-motion: no-preference) {
+  .stage[data-phase="done"] .seal { animation: stamp 640ms var(--ease) both; }
+  @keyframes stamp { from { transform: scale(1.4); opacity: 0; } to { transform: none; opacity: 1; } }
+}
+.halt { font: 300 clamp(62px, 10.5vw, 128px)/1 var(--mono); white-space: nowrap; color: var(--stop); font-variant-numeric: tabular-nums; }
+.halt i { font-style: normal; color: var(--edge-hi); margin: 0 6px; }
+.halt b { font-weight: 300; }
+
+/* ---- deck -------------------------------------------------------------- */
+.deck > div { display: none; flex-direction: column; gap: 18px; }
+.stage[data-phase="request"] .deck--request,
+.stage[data-phase="await"]   .deck--await,
+.stage[data-phase="install"] .deck--install,
+.stage[data-phase="halt"]    .deck--install,
+.stage[data-phase="done"]    .deck--done { display: flex; }
+@media (prefers-reduced-motion: no-preference) {
+  .stage[data-phase="request"] .deck--request,
+  .stage[data-phase="await"]   .deck--await,
+  .stage[data-phase="install"] .deck--install,
+  .stage[data-phase="done"]    .deck--done { animation: lift 460ms var(--ease) both; }
+  @keyframes lift { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+}
+
+/* ---- vehicle selector: a two-position switch on the instrument --------- */
+.picker { display: flex; flex-direction: column; }
+.picker-head {
+  display: flex; justify-content: space-between; align-items: baseline;
+  font: 500 13px/1 var(--mono); letter-spacing: 0.18em; color: var(--ink-3);
+  padding-bottom: 12px;
+}
+.picker-keys { display: flex; gap: 5px; }
+.picker-keys i {
+  font-style: normal; font-size: 11px; color: var(--ink-3);
+  border: 1px solid var(--edge); padding: 3px 6px; line-height: 1;
+}
+
+.picker-track {
+  position: relative;
+  display: grid; grid-template-columns: 1fr 1fr;
+  border: 1px solid var(--edge);
+  background: var(--ground);
+  isolation: isolate;
+}
+/* the moving part: one element that slides between the two seats */
+.picker-ind {
+  position: absolute; z-index: 0;
+  top: 0; bottom: 0; left: 0; width: 50%;
+  background: oklch(0.845 0.145 82 / 0.07);
+  border-bottom: 2px solid var(--lume);
+  transform: translateX(0);
+  transition: transform 520ms var(--ease);
+}
+.picker-track[data-sel="1"] .picker-ind { transform: translateX(100%); }
+@media (prefers-reduced-motion: reduce) { .picker-ind { transition: none; } }
+
+.picker-opt {
+  position: relative; z-index: 1;
+  appearance: none; border: 0; background: none; cursor: pointer;
+  display: flex; flex-direction: column; align-items: flex-start; gap: 6px;
+  padding: 20px 22px 22px;
+  text-align: left;
+  transition: color var(--med);
+}
+.picker-opt + .picker-opt { border-left: 1px solid var(--etch); }  /* 1px divider, not an accent */
+.picker-opt b {
+  font: 500 12px/1 var(--mono); letter-spacing: 0.2em;
+  color: var(--ink-3); font-weight: 500;
+  transition: color var(--med);
+}
+.picker-opt i {
+  font: 300 clamp(30px, 4.4vw, 52px)/0.95 var(--mono);
+  font-style: normal; letter-spacing: -0.02em;
+  color: var(--ink-3);
+  transition: color var(--med);
+}
+.picker-opt[aria-checked="true"] b { color: var(--lume); }
+.picker-opt[aria-checked="true"] i { color: var(--ink); }
+.picker-opt:hover i { color: var(--ink-2); }
+.picker-opt:focus-visible { outline-offset: -3px; }
+
+/* spec strip: real differentiating data, rolls over on change */
+.spec { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1px; background: var(--etch); border: 1px solid var(--edge); border-top: 0; }
+.spec > div { background: var(--ground); padding: 13px 16px; display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.spec dt { font: 500 11px/1 var(--mono); letter-spacing: 0.18em; color: var(--ink-3); }
+.spec dd {
+  font: 400 15px/1.25 var(--grot); color: var(--ink);
+  overflow: hidden; text-overflow: ellipsis;
+}
+@media (prefers-reduced-motion: no-preference) {
+  .spec.roll dd { animation: roll 420ms var(--ease) both; }
+  .spec.roll > div:nth-child(2) dd { animation-delay: 55ms; }
+  .spec.roll > div:nth-child(3) dd { animation-delay: 110ms; }
+  @keyframes roll {
+    from { opacity: 0; transform: translateY(-0.5em); }
+    to   { opacity: 1; transform: none; }
+  }
+}
+
+.bar {
+  appearance: none; width: 100%;
+  border: 1px solid var(--edge); background: transparent; color: var(--ink);
+  font: 500 16px/1 var(--grot); padding: 19px 22px; cursor: pointer; text-align: left;
+  display: flex; align-items: center; gap: 14px;
+  transition: border-color var(--med), color var(--med), background var(--med);
+}
+.bar-key { font: 500 12.5px/1 var(--mono); color: var(--ink-3); border: 1px solid var(--edge); padding: 5px 8px; }
+.bar:not(:disabled):hover { border-color: var(--lume); background: oklch(0.845 0.145 82 / 0.06); }
+.bar:not(:disabled):hover .bar-key { border-color: var(--lume); color: var(--lume); }
+.bar:disabled { color: var(--ink-3); border-color: var(--etch); cursor: default; }
+.bar:disabled .bar-key { color: var(--edge); border-color: var(--edge); }
+.bar--sm { width: auto; padding: 12px 17px; font-size: 14px; }
+
+.subrow { display: flex; justify-content: space-between; align-items: center; gap: 14px; flex-wrap: wrap; }
+.link {
+  appearance: none; border: 0; background: none; padding: 0 0 3px; cursor: pointer;
+  font: 500 13.5px/1 var(--mono); letter-spacing: 0.12em; color: var(--ink-3);
+  border-bottom: 1px solid var(--edge);
+  transition: color var(--med), border-color var(--med);
+}
+.link:hover { color: var(--lume); border-color: var(--lume); }
+
+.statusline { font: 400 15px/1.45 var(--grot); color: var(--ink-3); }
+.statusline.is-ok { color: var(--pass); }
+.statusline.is-err { color: var(--stop); }
+
+/* payment */
+/* ---- payment: two wallets + a receipt, one row ------------------------ */
+/* Wallets: uiverse.io/byllzz/rude-bat-50, one card each, recoloured from the
+   source green to the app's blue-tinted neutrals. The card faces are cream /
+   milky pastel so they lift off the dark shell. Amount lives in a tear-off
+   receipt (uiverse coupon), also ported to vanilla. Interactions kept: hover
+   lifts a card out of its wallet and reveals the number; tap reveals + copies
+   for touch. Receipt prints the amount and copies on tap. */
+.pay-row {
+  display: flex; flex-wrap: wrap; justify-content: center; align-items: flex-end;
+  gap: 20px 26px; padding-top: 6px;
+}
+
+/* --- wallet (single card) --- */
+.wallet {
+  --pocket: oklch(0.205 0.008 250);   /* toned to the app, was green */
+  --stitch: oklch(0.34 0.008 250);
+  position: relative; width: 210px; height: 198px; cursor: pointer;
+  perspective: 1000px; display: flex; justify-content: center; align-items: flex-end;
+  transition: transform 0.4s ease;
+}
+@keyframes slideIntoPocket {
+  0%   { transform: translateY(-90px); opacity: 0; }
+  100% { transform: translateY(0);     opacity: 1; }
+}
+.wallet-back {
+  position: absolute; bottom: 0; width: 210px; height: 148px; z-index: 5;
+  background: var(--pocket); border: 1px solid var(--stitch);
+  border-radius: 18px 18px 46px 46px;
+  box-shadow: inset 0 20px 28px rgba(0,0,0,0.4), inset 0 5px 15px rgba(0,0,0,0.5);
+}
+.card {
+  position: absolute; width: 192px; height: 122px; left: 9px; bottom: 58px; z-index: 20;
+  border-radius: 14px; padding: 14px; overflow: hidden;
+  box-shadow: inset 0 1px 1px rgba(255,255,255,0.65), 0 8px 18px rgba(0,0,0,0.5);
+  transition: transform 0.6s cubic-bezier(0.34,1.56,0.64,1), z-index 0s;
+  animation: slideIntoPocket 0.8s cubic-bezier(0.2,0.8,0.2,1) backwards;
+}
+.card-inner { display: flex; flex-direction: column; justify-content: space-between; height: 100%; }
+.card-top {
+  display: flex; justify-content: space-between; align-items: center;
+  font: 600 13px/1 var(--mono); letter-spacing: 0.05em; text-transform: uppercase;
+}
+.chip {
+  width: 30px; height: 22px; border-radius: 4px; flex: none;
+  background: linear-gradient(135deg, #e6cf88, #b6934a);
+  box-shadow: inset 0 0 0 1px rgba(0,0,0,0.15), inset 0 -4px 6px rgba(0,0,0,0.12);
+}
+.card-pan { align-self: stretch; }
+.hidden-stars { display: block; font: 500 12px/1 var(--mono); letter-spacing: 0.02em; white-space: nowrap; }
+.card-number { display: none; font: 600 12px/1 var(--mono); letter-spacing: 0.01em; white-space: nowrap; }
+.card-foot { display: flex; flex-direction: column; }
+.card-foot .label { margin-bottom: 3px; font-size: 8px; letter-spacing: 0.16em; opacity: 0.6; text-transform: uppercase; }
+.card-foot .value { font: 600 10px/1 var(--mono); letter-spacing: 0.03em; }
+
+/* pure-white faces (per request); brand hue kept only in the label/ink */
+.card.uzcard { background: #ffffff; color: #1a2b52; }
+.card.uzcard .card-top { color: #12489f; }
+.card.humo   { background: #ffffff; color: #143a30; }
+.card.humo .card-top { color: #0a7a66; }
+
+/* pocket: SVG shape, recoloured via CSS (inline fill/stroke removed) */
+.pocket {
+  position: absolute; bottom: 0; width: 210px; height: 118px; z-index: 40;
+  filter: drop-shadow(0 12px 20px rgba(0,0,0,0.45));
+}
+.pocket-svg { position: absolute; inset: 0; width: 100%; height: 100%; }
+.pocket-svg .pk-fill { fill: var(--pocket); }
+.pocket-svg .pk-stitch { stroke: var(--stitch); }
+
+/* hover: lift the card out of its pocket + reveal number */
+.wallet:hover { transform: translateY(-4px); }
+.wallet:hover .card { transform: translateY(-66px) rotate(-2deg); }
+.card:hover { z-index: 100 !important; transition-delay: 0s !important; }
+.wallet:hover .card:hover { transform: translateY(-72px) scale(1.04) rotate(0); }
+.card:hover .hidden-stars, .card.revealed .hidden-stars { display: none; }
+.card:hover .card-number,  .card.revealed .card-number  { display: block; }
+@media (prefers-reduced-motion: reduce) {
+  .card { animation: none; }
+  .wallet:hover .card { transform: translateY(-66px); }
+}
+
+/* --- cheque (amount due) — a serious payment stub, not a coupon ---------- */
+/* Amount is always visible; the one flourish is a real tear-off perforation
+   punched along the top edge (masked, static). No wiggle, no pull, no bounce.
+   Copy swaps a calm confirmation and never hides the amount. Sized to stand as
+   a peer in the row, not a footnote. */
+.cheque { display: flex; align-items: flex-end; filter: drop-shadow(0 7px 14px rgba(0,0,0,0.5)); }
+.cheque-body {
+  --paper: #efe8d6; --ink: #262119; --muted: #877c69; --rule: #cfc6b1;
+  position: relative; width: 178px; min-height: 168px;
+  display: flex; flex-direction: column; gap: 9px;
+  padding: 24px 18px 16px; border: none; text-align: left; cursor: pointer;
+  background: var(--paper); color: var(--ink); border-radius: 0 0 5px 5px;
+  /* tear-off perforation: half-circle punch-outs along the top edge only */
+  -webkit-mask: radial-gradient(circle 5px at 9px 0, #0000 5px, #000 5.4px) 0 0 / 18px 100% repeat-x;
+          mask: radial-gradient(circle 5px at 9px 0, #0000 5px, #000 5.4px) 0 0 / 18px 100% repeat-x;
+  transition: transform var(--med);
+}
+.cheque-body:hover  { transform: translateY(-3px); }
+.cheque-body:active { transform: translateY(-1px); }
+.cheque-label  { font: 500 11px/1 var(--mono); letter-spacing: 0.22em; text-transform: uppercase; color: var(--muted); }
+.cheque-amount { font: 600 18px/1.1 var(--mono); letter-spacing: 0; color: var(--ink); white-space: nowrap; }
+.cheque-foot {
+  margin-top: auto; padding-top: 11px; border-top: 1px dashed var(--rule);
+  display: flex; align-items: center; gap: 6px;
+  font: 500 11px/1 var(--mono); letter-spacing: 0.14em; text-transform: uppercase; color: var(--muted);
+}
+.cheque-done { display: none; color: #2f7d3f; }        /* muted green, not neon */
+.cheque-body.copied .cheque-hint { display: none; }
+.cheque-body.copied .cheque-done { display: inline; }
+@media (prefers-reduced-motion: reduce) { .cheque-body { transition: none; } }
+
+.pay-meta {
+  margin-top: 30px; display: flex; justify-content: space-between; align-items: center;
+  border-top: 1px solid var(--etch); padding-top: 13px;
+  font: 500 13px/1.5 var(--mono); letter-spacing: 0.16em; color: var(--ink-3);
+}
+.pay-meta b { font-weight: 400; color: var(--ink); }
+
+/* device */
+.device { display: flex; align-items: center; gap: 13px; border: 1px solid var(--edge); padding: 15px 17px; font: 400 15.5px/1.35 var(--grot); color: var(--ink-3); }
+.device::before { content: ""; width: 6px; height: 6px; background: var(--edge-hi); flex: none; }
+.device[data-state="on"] { color: var(--ink); }
+.device[data-state="on"]::before { background: var(--pass); }
+.device[data-state="busy"]::before { background: var(--lume); }
+.device span { flex: 1; }
+
+/* phases */
+.phases { list-style: none; }
+.phase {
+  display: flex; align-items: center; gap: 13px;
+  padding: 16px 2px; border-bottom: 1px solid var(--etch);
+  font: 400 16px/1.35 var(--grot); color: var(--ink-3);
+}
+.phase:last-child { border-bottom: 0; }
+.phase--idle { color: var(--ink-3); font-size: 15px; }
+.phase-n { font: 500 13px/1 var(--mono); color: var(--ink-3); width: 22px; }
+.phase-t { flex: 1; }
+.phase-s { font: 500 12.5px/1 var(--mono); letter-spacing: 0.14em; color: var(--ink-3); }
+.phase[data-state="active"] { color: var(--ink); }
+.phase[data-state="active"] .phase-n, .phase[data-state="active"] .phase-s { color: var(--lume); }
+.phase[data-state="done"] { color: var(--ink-2); }
+.phase[data-state="done"] .phase-n, .phase[data-state="done"] .phase-s { color: var(--pass); }
+.phase[data-state="failed"] { color: var(--ink); }
+.phase[data-state="failed"] .phase-n, .phase[data-state="failed"] .phase-s { color: var(--stop); }
+
+/* telemetry: collapsed by default, auto-opens on failure */
+.tele { border-top: 1px solid var(--etch); padding-top: 4px; }
+.tele summary {
+  cursor: pointer; list-style: none; padding: 8px 0;
+  font: 500 13px/1 var(--mono); letter-spacing: 0.14em; color: var(--ink-3);
+  display: flex; align-items: center; gap: 9px;
+}
+.tele summary::-webkit-details-marker { display: none; }
+.tele summary::before { content: "+"; color: var(--ink-3); }
+.tele[open] summary::before { content: "−"; }
+.tele summary:hover { color: var(--lume); }
+.tele-n { color: var(--ink); }
+.tele-body {
+  font: 400 13.5px/1.8 var(--mono); color: var(--ink-2);
+  background: var(--void); border: 1px solid var(--etch);
+  padding: 11px 13px; margin-top: 6px;
+  max-height: 240px; overflow: auto; white-space: pre-wrap; word-break: break-word;
+}
+.tele-body .ok { color: var(--pass); }
+.tele-body .er { color: var(--stop); }
+.tele-body .dim { color: var(--ink-3); }
+
+/* done recap */
+.recap { display: flex; flex-direction: column; }
+.recap > div { display: flex; justify-content: space-between; gap: 16px; padding: 12px 0; border-bottom: 1px solid var(--etch); }
+.recap > div:last-child { border-bottom: 0; }
+.recap dt { font: 500 13px/1.5 var(--mono); letter-spacing: 0.16em; color: var(--ink-3); }
+.recap dd { font: 400 16px/1.4 var(--mono); color: var(--ink); }
+
+/* ---- cat --------------------------------------------------------------- */
+/* Perched on the frame's top line, slightly left of centre. The artwork ships
+   as a pure-black silhouette, which is invisible on this ground and cannot be
+   lifted by a filter, so app.js repaints its fills to the interface ink (eyes
+   to the amber accent) before mount. It reads as another mark in the system. */
+.cat {
+  position: absolute;
+  left: 34px;                       /* at the left end of the ledge, inset a little */
+  bottom: 100%;                     /* stands on the top edge */
+  margin-bottom: -1px;              /* feet land ON the 1px line, not above it */
+  width: 205px;                     /* height comes from the cropped ratio,
+                                       set by cropCat() at mount */
+  z-index: 2;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity var(--slow);
+}
+.cat[data-on="1"] { opacity: 0.62; }
+/* the perch needs headroom above the frame, but only when the cat is really
+   there: the class is set by app.js after a successful mount. */
+.stage.has-cat .machine { margin-top: 122px; }
+@media (max-width: 760px) { .stage.has-cat .machine { margin-top: 96px; } }
+@media (max-width: 520px) { .stage.has-cat .machine { margin-top: 76px; } }
+.cat > svg { display: block; }
+
+/* recedes while the machine works, steps forward on success */
+.stage[data-phase="install"] .cat { opacity: 0.3; }
+.stage[data-phase="halt"]    .cat { opacity: 0.22; }
+.stage[data-phase="done"]    .cat { opacity: 0.85; }
+
+@media (max-width: 760px) {
+  .cat { width: 160px; left: 24px; }
+}
+@media (max-width: 520px) {
+  .cat { width: 126px; left: 16px; }
+}
+
+/* ---- responsive -------------------------------------------------------- */
+@media (max-width: 560px) {
+  .frame { padding: 26px 14px 18px; }
+  .slots { gap: 2px; }
+  .slot::after { font-size: 9px; }
+  .corelabel { letter-spacing: 0.1em; }
+  /* the switch stays side-by-side (two seats is the whole idea); the spec stacks */
+  .picker-opt { padding: 15px 14px 17px; }
+  .spec { grid-template-columns: 1fr; }
+  .spec > div { flex-direction: row; justify-content: space-between; align-items: baseline; }
+}

@@ -1,0 +1,39 @@
+/* Self-hosted typefaces. No network, no build step, no bare specifiers.
+   Both families are licensed under the SIL Open Font License; the licence
+   files sit beside the .woff2 files in this folder and must travel with them.
+
+   Martian Mono — three static weights, matching what style.css uses:
+     300 the large readouts (percent, halt, car names)
+     500 labels, slots, code chrome
+     700 the approval code
+   Archivo   — one variable file covering the 400..600 range used for prose.  */
+
+@font-face {
+  font-family: "Martian Mono";
+  font-style: normal;
+  font-weight: 300;
+  font-display: swap;
+  src: url("./martian-mono-300.woff2") format("woff2");
+}
+@font-face {
+  font-family: "Martian Mono";
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url("./martian-mono-500.woff2") format("woff2");
+}
+@font-face {
+  font-family: "Martian Mono";
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url("./martian-mono-700.woff2") format("woff2");
+}
+
+@font-face {
+  font-family: "Archivo Variable";
+  font-style: normal;
+  font-weight: 100 900;          /* variable axis */
+  font-display: swap;
+  src: url("./archivo-wght.woff2") format("woff2-variations");
+}

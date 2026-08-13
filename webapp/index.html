@@ -1,0 +1,181 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Car·APK</title>
+<link rel="stylesheet" href="style.css" />
+</head>
+<body>
+<main class="stage" id="stage" data-phase="request">
+
+  <!-- THE MACHINE — one object, five states -------------------------------- -->
+  <section class="machine">
+    <div class="frame">
+      <!-- perched on the top line. Decorative, so hidden from assistive tech;
+           renders only if the runtime and ./cat.json both resolve. -->
+      <div class="cat" id="cat" aria-hidden="true"></div>
+      <div class="scale" id="scale"><span class="scale-fill" id="scale-fill"></span></div>
+
+      <!-- the readout label sits ABOVE its target, never floating below -->
+      <div class="corelabel" id="corelabel">VIN<i id="vin-count">0 / 17</i></div>
+
+      <div class="core">
+        <div class="layer layer--vin" id="layer-vin">
+          <input id="vin" class="vin-capture" maxlength="17" autocomplete="off"
+                 spellcheck="false" aria-describedby="vin-hint" aria-label="Vehicle identification number" />
+          <div class="slots" id="slots" aria-hidden="true"></div>
+        </div>
+        <div class="layer layer--code"><span id="code" class="code">······</span></div>
+        <div class="layer layer--run">
+          <span class="pct" id="pct">0</span><span class="pct-mark">%</span>
+        </div>
+        <div class="layer layer--seal"><span class="seal">✓</span></div>
+        <div class="layer layer--halt">
+          <span class="halt"><b id="halt-n">00</b><i>/</i><span id="halt-t">00</span></span>
+        </div>
+      </div>
+
+      <p class="hint" id="vin-hint">Type the 17-character VIN. Letters and digits only.</p>
+    </div>
+  </section>
+
+  <!-- DECK ----------------------------------------------------------------- -->
+  <div class="deck">
+
+    <div class="deck--request">
+      <div class="picker">
+        <div class="picker-head">
+          <span>VEHICLE</span>
+          <span class="picker-keys"><i>←</i><i>→</i></span>
+        </div>
+        <div class="picker-track" id="picker-track" role="radiogroup" aria-label="Vehicle">
+          <span class="picker-ind" id="picker-ind" aria-hidden="true"></span>
+          <button type="button" class="picker-opt" role="radio" aria-checked="true"
+                  data-car="dongfeng_mage" tabindex="0">
+            <b>Aeolus</b><i>MAGE</i>
+          </button>
+          <button type="button" class="picker-opt" role="radio" aria-checked="false"
+                  data-car="faw_b70" tabindex="-1">
+            <b>FAW</b><i>B70</i>
+          </button>
+        </div>
+        <dl class="spec" id="spec">
+          <div><dt>ANDROID</dt><dd id="sp-os">—</dd></div>
+          <div><dt>LINK</dt><dd id="sp-link">—</dd></div>
+          <div><dt>INSTALLS</dt><dd id="sp-apps">—</dd></div>
+        </dl>
+      </div>
+      <button id="btn-arm" class="bar" type="button">
+        <span class="bar-key">↵</span> Request activation</button>
+      <div class="subrow">
+        <span id="request-status" class="statusline"></span>
+      </div>
+    </div>
+
+    <div class="deck--await">
+      <!-- payment: two wallets (one card each, uiverse rude-bat-50) + a serious
+           payment cheque for the amount, in one row. Wallets toned to the app
+           palette; the cards are cream/milky so they lift off the dark shell.
+           Hover lifts a card out of its wallet to reveal the number; on touch,
+           tapping a card reveals + copies it. The cheque always shows the amount
+           and copies it on tap (calm "Copied" confirmation, no wiggle/pull). -->
+      <div class="pay-row">
+
+        <div class="wallet" data-wallet>
+          <div class="wallet-back" aria-hidden="true"></div>
+          <div class="card uzcard" data-card id="card-uz">
+            <div class="card-inner">
+              <div class="card-top"><span>UZCARD</span><div class="chip" aria-hidden="true"></div></div>
+              <div class="card-pan">
+                <span class="hidden-stars" id="uz-mask">•••• •••• •••• ••••</span>
+                <span class="card-number" id="uz-number">—</span>
+              </div>
+              <div class="card-foot"><span class="label">Holder</span><span class="value" id="uz-holder">—</span></div>
+            </div>
+          </div>
+          <div class="pocket" aria-hidden="true">
+            <svg class="pocket-svg" viewBox="0 0 280 160" fill="none" preserveAspectRatio="none">
+              <path class="pk-fill" d="M 0 20 C 0 10, 5 10, 10 10 C 20 10, 25 25, 40 25 L 240 25 C 255 25, 260 10, 270 10 C 275 10, 280 10, 280 20 L 280 120 C 280 155, 260 160, 240 160 L 40 160 C 20 160, 0 155, 0 120 Z" />
+              <path class="pk-stitch" d="M 8 22 C 8 16, 12 16, 15 16 C 23 16, 27 29, 40 29 L 240 29 C 253 29, 257 16, 265 16 C 268 16, 272 16, 272 22 L 272 120 C 272 150, 255 152, 240 152 L 40 152 C 25 152, 8 152, 8 120 Z" stroke-width="1.5" stroke-dasharray="6 4" />
+            </svg>
+          </div>
+        </div>
+
+        <div class="wallet" data-wallet>
+          <div class="wallet-back" aria-hidden="true"></div>
+          <div class="card humo" data-card id="card-humo">
+            <div class="card-inner">
+              <div class="card-top"><span>HUMO</span><div class="chip" aria-hidden="true"></div></div>
+              <div class="card-pan">
+                <span class="hidden-stars" id="humo-mask">•••• •••• •••• ••••</span>
+                <span class="card-number" id="humo-number">—</span>
+              </div>
+              <div class="card-foot"><span class="label">Holder</span><span class="value" id="humo-holder">—</span></div>
+            </div>
+          </div>
+          <div class="pocket" aria-hidden="true">
+            <svg class="pocket-svg" viewBox="0 0 280 160" fill="none" preserveAspectRatio="none">
+              <path class="pk-fill" d="M 0 20 C 0 10, 5 10, 10 10 C 20 10, 25 25, 40 25 L 240 25 C 255 25, 260 10, 270 10 C 275 10, 280 10, 280 20 L 280 120 C 280 155, 260 160, 240 160 L 40 160 C 20 160, 0 155, 0 120 Z" />
+              <path class="pk-stitch" d="M 8 22 C 8 16, 12 16, 15 16 C 23 16, 27 29, 40 29 L 240 29 C 253 29, 257 16, 265 16 C 268 16, 272 16, 272 22 L 272 120 C 272 150, 255 152, 240 152 L 40 152 C 25 152, 8 152, 8 120 Z" stroke-width="1.5" stroke-dasharray="6 4" />
+            </svg>
+          </div>
+        </div>
+
+        <!-- serious payment stub (not a coupon): amount always shown, real
+             tear-off perforation, calm copy confirmation. No wiggle/pull. -->
+        <div class="cheque">
+          <button class="cheque-body" id="receipt-paper" type="button" aria-label="Amount due, tap to copy">
+            <span class="cheque-label">Amount due</span>
+            <span class="cheque-amount" id="receipt-amount">—</span>
+            <span class="cheque-foot">
+              <span class="cheque-hint">Tap to copy</span>
+              <span class="cheque-done" aria-hidden="true">✓ Copied</span>
+            </span>
+          </button>
+        </div>
+
+      </div>
+      <div class="pay-meta">
+        <span>Telegram</span><b id="pay-tg-2">—</b>
+      </div>
+      <div class="subrow">
+        <button id="btn-copy" class="link" type="button">Copy code</button>
+        <span id="wait-status" class="statusline">Send this code with your payment.</span>
+      </div>
+    </div>
+
+    <div class="deck--install">
+      <div class="device" id="device" data-state="off">
+        <span id="device-name">No head unit linked</span>
+        <button id="btn-connect" class="bar bar--sm" type="button">Connect</button>
+      </div>
+      <ol class="phases" id="phases">
+        <li class="phase phase--idle" id="phase-idle">Link a head unit to load the install plan.</li>
+      </ol>
+      <button id="btn-install" class="bar" type="button" disabled>
+        <span class="bar-key">↵</span> Run install</button>
+      <span id="run-status" class="statusline"></span>
+
+      <!-- telemetry: present and reachable, collapsed by default -->
+      <details class="tele" id="tele">
+        <summary><span class="tele-n" id="tele-n">0</span> operations</summary>
+        <pre id="log" class="tele-body"></pre>
+      </details>
+    </div>
+
+    <div class="deck--done">
+      <dl class="recap" id="recap"></dl>
+      <button id="btn-again" class="bar" type="button">Provision another unit</button>
+    </div>
+
+  </div>
+
+  <span id="live" class="sr-only" role="status" aria-live="polite"></span>
+</main>
+
+<script src="/vendor/lottie.min.js" defer></script>
+<script src="/config.js"></script>
+<script type="module" src="app.js"></script>
+</body>
+</html>
