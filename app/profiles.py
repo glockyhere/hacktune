@@ -153,6 +153,9 @@ DF_STEPS = [
     {"file": "df02_yandexnavi.apk", "pkg": "ru.yandex.yandexnavi", "name": "Yandex Navi",
      "post": "navi", "size": 106087315,
      "sha256": "6e0260b07e1f909e9dea2b2896932b4a6dd4cf1dc277abfe387963e7f6dafe2f"},
+    {"file": "df04_backbutton.apk", "pkg": "nu.back.button", "name": "Floating back button",
+     "post": "backbutton", "size": 3506183,
+     "sha256": "1ea675b78b7fa3ada1073910a00342738cf5ccea7c34836d7891a54269305b36"},
     {"file": "df03_antiradar.apk", "pkg": "com.mybedy.antiradar", "name": "Antiradar (ContraCam)",
      "post": "antiradar", "size": 39923373,
      "sha256": "eb1e9420b8a8e1c24acb098af7b93c69fbbbd20fdabd1fba8bf201427a889081"},
@@ -236,6 +239,32 @@ def _df_post_navi(serial: str, log: Log) -> None:
     for p in NAVI_PERMS:
         _sh(serial, f"pm grant ru.yandex.yandexnavi {p}")
     log("  ✓ permissions granted")
+
+
+def _df_post_backbutton(serial: str, log: Log) -> None:
+    """Overlay + accessibility, the two things a floating back button needs.
+
+    The accessibility list is APPENDED to, never overwritten: the MAGE ships its
+    own accessibility services and clobbering the setting would silently turn
+    them off. Idempotent, so re-running a session cannot duplicate the entry.
+    """
+    log("  · granting overlay permission (SYSTEM_ALERT_WINDOW)…")
+    _sh(serial, "appops set nu.back.button SYSTEM_ALERT_WINDOW allow")
+
+    log("  · enabling the accessibility service…")
+    cur = (_sh(serial, "settings get secure enabled_accessibility_services") or "").strip()
+    if "back.button" in cur:
+        new = cur
+    elif not cur or cur == "null":
+        new = BACK_A11Y
+    else:
+        new = cur + ":" + BACK_A11Y
+    _sh(serial, f"settings put secure enabled_accessibility_services '{new}'")
+    _sh(serial, "settings put secure accessibility_enabled 1")
+
+    # the service only starts once the app has been opened at least once
+    _sh(serial, "monkey -p nu.back.button -c android.intent.category.LAUNCHER 1")
+    log("  ✓ floating back button enabled")
 
 
 def _df_post_antiradar(serial: str, log: Log) -> None:
@@ -326,7 +355,8 @@ PROFILES = {
         "steps": DF_STEPS,
         "prepare": _df_prepare,
         "finish": _df_finish,
-        "post": {"navi": _df_post_navi, "antiradar": _df_post_antiradar},
+        "post": {"navi": _df_post_navi, "antiradar": _df_post_antiradar,
+                 "backbutton": _df_post_backbutton},
         # -g pre-grants runtime permissions; the cert check is already cleared.
         "install_flags": ["-r", "-g"],
         "match": lambda p: (

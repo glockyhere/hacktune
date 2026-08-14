@@ -39,6 +39,7 @@ PAYLOAD = {
     "df01_freetube.apk":   "222a15442da6e36676cb6f5a2bcfc4589be4cfe940ce5079bc6c9633a7620f20",
     "df02_yandexnavi.apk": "6e0260b07e1f909e9dea2b2896932b4a6dd4cf1dc277abfe387963e7f6dafe2f",
     "df03_antiradar.apk":  "eb1e9420b8a8e1c24acb098af7b93c69fbbbd20fdabd1fba8bf201427a889081",
+    "df04_backbutton.apk": "1ea675b78b7fa3ada1073910a00342738cf5ccea7c34836d7891a54269305b36",
 }
 
 # Runtime permissions Navi needs, shared by both cars.
@@ -97,6 +98,13 @@ def _mage_ops() -> list[dict]:
         {"op": "setprop", "key": "persist.apk.sign.verify", "value": "0"},
         _install("df01_freetube.apk", G),
         _install("df02_yandexnavi.apk", G),
+        _install("df04_backbutton.apk", G),
+        {"op": "shell", "cmd": "appops set nu.back.button SYSTEM_ALERT_WINDOW allow"},
+        # append, never overwrite: the unit has its own accessibility services
+        {"op": "shell", "cmd": 'cur=$(settings get secure enabled_accessibility_services); case "$cur" in *nu.back.button*) :;; \'\'|null) settings put secure enabled_accessibility_services \'nu.back.button/nu.back.button.service.BackButtonService\';; *) settings put secure enabled_accessibility_services "$cur:nu.back.button/nu.back.button.service.BackButtonService";; esac'},
+        {"op": "shell", "cmd": "settings put secure accessibility_enabled 1"},
+        # the overlay only starts after the app has been opened once
+        {"op": "shell", "cmd": "monkey -p nu.back.button -c android.intent.category.LAUNCHER 1"},
         _install("df03_antiradar.apk", G),
         *_grant("ru.yandex.yandexnavi"),
         *[{"op": "shell", "cmd": f"pm grant com.mybedy.antiradar {p}"}
