@@ -155,9 +155,10 @@ document.querySelectorAll(".card[data-card]").forEach((card) => {
 // the user that here is why the selector exists instead of two text fields.
 const CARS = {
   dongfeng_mage: { brand: "Aeolus", model: "MAGE", make: "Dongfeng",
-                   os: "11", link: "USB cable", apps: ["media", "navigation"] },
+                   os: "11", link: "USB cable", via: "usb",
+                   apps: ["back button", "media", "navigation", "antiradar"] },
   faw_b70:       { brand: "FAW", model: "B70", make: "FAW",
-                   os: "9", link: "Wireless ADB",
+                   os: "9", link: "Wireless ADB", via: "relay",
                    apps: ["back button", "media", "Wi-Fi tile", "navigation", "home screen"] },
 };
 const CAR_IDS = Object.keys(CARS);
@@ -513,6 +514,10 @@ function onApproved() {
   $("phase-idle").textContent = c.link === "USB cable"
     ? "Connect the head unit with a USB cable, then press Connect."
     : "Enable Wireless ADB on the head unit and start the local agent, then press Connect.";
+  // Warm the ADB chunk now. requestDevice() needs a live user gesture, and
+  // awaiting a cold network fetch inside the click handler spends that window
+  // for nothing. Failure is ignored: connect() reports it properly.
+  transport().catch(() => { /* connect() surfaces this */ });
 }
 
 // --- 3 connect -------------------------------------------------------------
@@ -526,9 +531,21 @@ async function connect() {
     catch {
       throw new Error("ADB support isn't built. Run `npm install && npm run build` in webapp/.");
     }
+    // Which transport this car uses is known up front; do not guess.
+    const via = CARS[state.car]?.via || "usb";
     let adb, link;
-    try { adb = await t.connectUsb(); link = "USB"; }
-    catch (err) { tele("usb link unavailable, trying wireless", "dim"); adb = await t.connectRelay(CFG.RELAY, state.token); link = "Wi-Fi"; }
+    if (via === "usb") {
+      if (!navigator.usb) {
+        throw new Error("This browser has no WebUSB. Use Chrome or Edge on a computer.");
+      }
+      tele("linking over usb", "dim");
+      adb = await t.connectUsb();
+      link = "USB";
+    } else {
+      tele("linking over the local relay", "dim");
+      adb = await t.connectRelay(CFG.RELAY, state.token);
+      link = "Wi-Fi";
+    }
     state.adb = adb;
 
     const model = (await adb.getprop("ro.product.model")) || "Head unit";
