@@ -14,6 +14,7 @@ folder — the program picks the right set at runtime from the detected unit.
    FAW B70 (ECARX, Android 9)          Dongfeng Aeolus MAGE (Android 11)
    01_backbutton.apk                   df01_freetube.apk
    02_freetube.apk                     df02_yandexnavi.apk
+   03_wifishortcut.apk                 df03_antiradar.apk
    03_wifishortcut.apk
    04_yandexnavi.apk
    05_launcher.apk
@@ -37,6 +38,7 @@ folder — the program picks the right set at runtime from the detected unit.
 2af15edfb65024acbc7f09323a1c97a1d9af3035d503fd9cc83e34eda5ed1246  05_launcher.apk
 222a15442da6e36676cb6f5a2bcfc4589be4cfe940ce5079bc6c9633a7620f20  df01_freetube.apk
 6e0260b07e1f909e9dea2b2896932b4a6dd4cf1dc277abfe387963e7f6dafe2f  df02_yandexnavi.apk
+eb1e9420b8a8e1c24acb098af7b93c69fbbbd20fdabd1fba8bf201427a889081  df03_antiradar.apk
 ```
 If you ever rebuild an APK, recompute its hash (`shasum -a 256 <file>`) and update
 the matching `sha256` in `app/profiles.py`, then rebuild the exe.
@@ -50,6 +52,11 @@ the matching `sha256` in `app/profiles.py`, then rebuild the exe.
   installs. See `docs/DONGFENG_MAGE.md`.
 - `df01_freetube.apk` is FreeTube with its launcher icon restyled to the MAGE's
   native tile spec (`tools/restyle_icon.py`) and re-signed with your own key.
+- `df03_antiradar.apk` is ContraCam 3.9.34, package `com.mybedy.antiradar`.
+  This is the **-Google** build: it declares `com.android.vending.BILLING` and
+  FCM receive, so anything account, subscription or push related expects Play
+  Services, which the MAGE does not have. Detection itself is local and should
+  work regardless. Ship pristine; do not re-sign.
 - `df02_yandexnavi.apk` is the **pristine, unmodified** Yandex Navi. Do not
   re-sign it: `com.yandex.passport` checks its own signature and crash-loops.
   This is why it is a separate file from `04_yandexnavi.apk`.

@@ -38,9 +38,16 @@ PAYLOAD = {
     "05_launcher.apk":     "2af15edfb65024acbc7f09323a1c97a1d9af3035d503fd9cc83e34eda5ed1246",
     "df01_freetube.apk":   "222a15442da6e36676cb6f5a2bcfc4589be4cfe940ce5079bc6c9633a7620f20",
     "df02_yandexnavi.apk": "6e0260b07e1f909e9dea2b2896932b4a6dd4cf1dc277abfe387963e7f6dafe2f",
+    "df03_antiradar.apk":  "eb1e9420b8a8e1c24acb098af7b93c69fbbbd20fdabd1fba8bf201427a889081",
 }
 
 # Runtime permissions Navi needs, shared by both cars.
+_ANTIRADAR_PERMS = [
+    "android.permission.ACCESS_FINE_LOCATION",
+    "android.permission.ACCESS_COARSE_LOCATION",
+    "android.permission.ACCESS_BACKGROUND_LOCATION",
+]
+
 _NAVI_PERMS = [
     "android.permission.ACCESS_FINE_LOCATION",
     "android.permission.ACCESS_COARSE_LOCATION",
@@ -90,7 +97,13 @@ def _mage_ops() -> list[dict]:
         {"op": "setprop", "key": "persist.apk.sign.verify", "value": "0"},
         _install("df01_freetube.apk", G),
         _install("df02_yandexnavi.apk", G),
+        _install("df03_antiradar.apk", G),
         *_grant("ru.yandex.yandexnavi"),
+        *[{"op": "shell", "cmd": f"pm grant com.mybedy.antiradar {p}"}
+          for p in _ANTIRADAR_PERMS],
+        # overlay is an appop, not a runtime permission: -g and pm grant cannot
+        # set it, and without it the speed-camera warnings cannot draw over the map
+        {"op": "shell", "cmd": "appops set com.mybedy.antiradar SYSTEM_ALERT_WINDOW allow"},
         # menu rows — idempotent (delete then insert at max+1)
         {"op": "sqlite", "db": db, "stmt": "delete from allApp where pkgName='freetube.com';"},
         {"op": "sqlite", "db": db,
@@ -98,6 +111,10 @@ def _mage_ops() -> list[dict]:
         {"op": "sqlite", "db": db, "stmt": "delete from allApp where pkgName='ru.yandex.yandexnavi';"},
         {"op": "sqlite", "db": db,
          "stmt": f"{ins} ('Яндекс Навигатор','ru.yandex.yandexnavi','icon_allapp_navi',"
+                 "(select ifnull(max(position),-1)+1 from allApp));"},
+        {"op": "sqlite", "db": db, "stmt": "delete from allApp where pkgName='com.mybedy.antiradar';"},
+        {"op": "sqlite", "db": db,
+         "stmt": f"{ins} ('Antiradar','com.mybedy.antiradar','',"
                  "(select ifnull(max(position),-1)+1 from allApp));"},
         # reload the launcher WITHOUT force-stop (see docs/DONGFENG_MAGE.md)
         {"op": "settings", "ns": "global", "key": "show_launcher_test_app_key", "value": "1"},

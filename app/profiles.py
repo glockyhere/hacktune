@@ -52,6 +52,16 @@ FAW_LAUNCHER_PKG = "com.fawcar.dlife6.launcher"
 BACK_A11Y = "nu.back.button/nu.back.button.service.BackButtonService"
 
 # Runtime permissions Navi needs to show the map / locate.
+# Runtime permissions ContraCam (antiradar) actually declares, filtered to the
+# ones that are grantable on the MAGE's Android 11. Background location is a
+# separate grant on API 29+: without it the app stops detecting once the screen
+# sleeps, which on a head unit is most of the drive.
+ANTIRADAR_PERMS = [
+    "android.permission.ACCESS_FINE_LOCATION",
+    "android.permission.ACCESS_COARSE_LOCATION",
+    "android.permission.ACCESS_BACKGROUND_LOCATION",
+]
+
 NAVI_PERMS = [
     "android.permission.ACCESS_FINE_LOCATION",
     "android.permission.ACCESS_COARSE_LOCATION",
@@ -143,6 +153,9 @@ DF_STEPS = [
     {"file": "df02_yandexnavi.apk", "pkg": "ru.yandex.yandexnavi", "name": "Yandex Navi",
      "post": "navi", "size": 106087315,
      "sha256": "6e0260b07e1f909e9dea2b2896932b4a6dd4cf1dc277abfe387963e7f6dafe2f"},
+    {"file": "df03_antiradar.apk", "pkg": "com.mybedy.antiradar", "name": "Antiradar (ContraCam)",
+     "post": "antiradar", "size": 39923373,
+     "sha256": "eb1e9420b8a8e1c24acb098af7b93c69fbbbd20fdabd1fba8bf201427a889081"},
 ]
 
 # Rows written into the launcher's `allApp` table so the apps appear in the menu.
@@ -160,6 +173,7 @@ DF_STEPS = [
 DF_MENU_ROWS = [
     {"pkg": "freetube.com",         "label": "FreeTube",         "icon": ""},
     {"pkg": "ru.yandex.yandexnavi", "label": "Яндекс Навигатор",  "icon": "icon_allapp_navi"},
+    {"pkg": "com.mybedy.antiradar",  "label": "Antiradar",         "icon": ""},
 ]
 
 
@@ -222,6 +236,18 @@ def _df_post_navi(serial: str, log: Log) -> None:
     for p in NAVI_PERMS:
         _sh(serial, f"pm grant ru.yandex.yandexnavi {p}")
     log("  ✓ permissions granted")
+
+
+def _df_post_antiradar(serial: str, log: Log) -> None:
+    log("  · granting Antiradar location permissions…")
+    for perm in ANTIRADAR_PERMS:
+        _sh(serial, f"pm grant com.mybedy.antiradar {perm}")
+    # Floating speed-camera warnings draw over the navigation map. This is an
+    # appop, not a runtime permission, so `pm grant` cannot set it — same
+    # mechanism the FAW back-button app needs.
+    log("  · allowing overlay (SYSTEM_ALERT_WINDOW)…")
+    _sh(serial, "appops set com.mybedy.antiradar SYSTEM_ALERT_WINDOW allow")
+    log("  ✓ Antiradar configured")
 
 
 def _sql(serial: str, statement: str, log: Log | None = None) -> str:
@@ -300,7 +326,7 @@ PROFILES = {
         "steps": DF_STEPS,
         "prepare": _df_prepare,
         "finish": _df_finish,
-        "post": {"navi": _df_post_navi},
+        "post": {"navi": _df_post_navi, "antiradar": _df_post_antiradar},
         # -g pre-grants runtime permissions; the cert check is already cleared.
         "install_flags": ["-r", "-g"],
         "match": lambda p: (
