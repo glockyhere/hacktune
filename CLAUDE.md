@@ -182,7 +182,15 @@ GUI lives in `app/gui.py`. Style tokens (colors/fonts) are at the top. Suggested
       install is marked consumed). `activation.mark_consumed`/`is_consumed` exist.
 - [ ] **Certify the last mile:** when a head unit is available, run the whole flow
       through the built exe once (request→approve→download→install) and note it here.
-- [ ] **Upload the MAGE payload to R2** — `df01_freetube.apk`, `df02_yandexnavi.apk`
+- [x] **Payload delivery is done for the WEB path** — all 8 APKs live on the VPS
+      at `/var/lib/carapk/payload`, served by `/dl` behind signed URLs and
+      hash-verified end to end. No public bucket involved.
+- [ ] **Desktop app still downloads from the PUBLIC bucket.** `APK_BASE_URL` in
+      `app/config.py` points at `pub-*.r2.dev`: the FAW payload is still free to
+      anyone with the URL, and the MAGE payload was never uploaded there, so the
+      desktop app cannot provision a MAGE at all. Move it onto `/api/plan` +
+      signed `/dl` (it already holds a token) — the change is in `app/download.py`.
+- [ ] **~~Upload the MAGE payload to R2~~** (superseded by the above) — `df01_freetube.apk`, `df02_yandexnavi.apk`
       are staged in `payload/` but NOT yet uploaded; `verify_cloud.py` will fail on
       them until they are. See `payload/UPLOAD.md` and `docs/DEPLOY.md` step 3.
 - [ ] **Web client — validate the ADB transport on hardware.** This is now the
@@ -195,10 +203,9 @@ GUI lives in `app/gui.py`. Style tokens (colors/fonts) are at the top. Suggested
       `deploy/production.env`, run `python deploy/configure.py`, then follow it.
       The VPS still runs the pre-CORS build, so the web client fails every call
       with "Load failed" until step 4 of that doc is done.
-- [ ] **Make the payload bucket PRIVATE.** Still the one live security hole: the
-      origin is a public `pub-*.r2.dev` bucket, so the APKs are downloadable free.
-      The server side is ready (`PAYLOAD_ORIGIN` + the new `PAYLOAD_AUTH` secret
-      header); it needs the Cloudflare side doing — `docs/DEPLOY.md` step 3.
+- [ ] **Empty or disable the public R2 bucket.** The web path no longer uses it,
+      but `01`–`05` still return 200 there, so the FAW payload remains free to
+      anyone with the URL. Do this only after the desktop app is moved off it.
 - [ ] **B70 over wireless (already the field setup):** re-confirm the ~100 MB
       Navi push survives a Wi-Fi drop mid-install now that provision.py re-checks
       the transport and reconnects before each push. MAGE is USB — no such gap.

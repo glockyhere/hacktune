@@ -14,8 +14,8 @@ Topology (root domain for the app, `api.` for the backend):
    ├── https://api.example.com        VPS + Caddy        FastAPI activation API
    │        │  streams APKs via expiring /dl links
    │        ▼
-   └── https://payload.example.com    R2 custom domain   APKs, header-gated
-            (reachable only by the VPS — never by a browser)
+   └── file:///var/lib/carapk/payload  on the VPS itself   APKs, not web-reachable
+            (streamed by /dl only after the signature checks out)
 ```
 
 The browser only ever talks to the first two. It never learns the payload host:
@@ -29,7 +29,7 @@ in 15 minutes and nothing else.
 - Cloudflare account with your domain's nameservers already delegated
 - The VPS running the activation API (see `docs/ACTIVATION_VPS.md`)
 - Node 20+ locally, for the build
-- `npx wrangler login` once, for Pages uploads
+- `npx wrangler login` once, for Pages uploads (git-connected needs none)
 
 ## 1. Fill in the one file
 
@@ -56,44 +56,45 @@ hold your card numbers and freshly minted secrets.
 |---|---|---|---|
 | A | `api` | your VPS IP | **DNS only (grey cloud)** |
 | CNAME | `@` | (created by Pages in step 5) | Proxied |
-| CNAME | `payload` | (created by R2 in step 3) | Proxied |
 
 > **`api` must stay grey-clouded.** Behind the orange cloud, Caddy's HTTP-01
 > challenge can't complete and TLS issuance fails. If you want it proxied later,
 > switch Caddy to a Cloudflare Origin Certificate first.
 
-## 3. Lock the payload (closes the one live security hole)
+## 3. Payload delivery (done: served from the VPS, not R2)
 
-Until now the APKs sat on a public `pub-*.r2.dev` bucket: anyone with a URL
-downloaded them free, so the paywall sold convenience, not access.
+The web client's payload is **served from the VPS itself**, not from R2:
 
-1. **R2 → your bucket → Settings → Public access: disable** the `r2.dev` URL.
-2. **Custom domain**: attach `payload.example.com` to the bucket.
-3. **WAF rule** (Security → WAF → Custom rules) on that hostname:
+```
+PAYLOAD_ORIGIN=file:///var/lib/carapk/payload
+DOWNLOAD_HMAC_KEY=<64-char secret, already set>
+DOWNLOAD_TTL=900
+```
 
-   ```
-   Field:  Hostname          equals    payload.example.com
-   AND     Header X-Payload-Auth   ne    <PAYLOAD_AUTH value from vps-env.generated>
-   Action: Block
-   ```
+`/dl` streams from that directory only after checking the HMAC signature minted
+by `/api/plan` for one approved session. The files are not web-reachable by any
+other route, so there is no bucket to make private, no custom domain, and no WAF
+rule to maintain. All eight APKs are uploaded and hash-verified against the pins.
 
-   The VPS sends that header (`PAYLOAD_AUTH` in the env). A browser never does,
-   so the bucket is unreachable to the public even if the hostname leaks.
+This replaced the original R2 plan because it removes the public-bucket problem
+outright rather than gating it, and needs no Cloudflare credentials. R2 remains a
+valid alternative: set `PAYLOAD_ORIGIN` to a private origin plus `PAYLOAD_AUTH`
+and the flow is unchanged.
 
-4. **Upload every APK** — including the two MAGE files that were never uploaded:
+### Still open: the desktop app is on the old path
 
-   ```bash
-   # 01–05 = FAW B70,  df01–df02 = Dongfeng MAGE
-   npx wrangler r2 object put <bucket>/df01_freetube.apk   --file payload/df01_freetube.apk
-   npx wrangler r2 object put <bucket>/df02_yandexnavi.apk --file payload/df02_yandexnavi.apk
-   ```
+`app/config.py` still points `APK_BASE_URL` at the public `pub-*.r2.dev` bucket.
+Two consequences:
 
-5. Confirm the gate works — the first must fail, the second succeed:
+- the **FAW payload is still downloadable by anyone** with the URL, so the
+  paywall sells convenience rather than access for that car
+- the **MAGE payload was never uploaded there**, so the desktop app cannot
+  provision a MAGE at all (`python verify_cloud.py` fails on df01/df02/df03)
 
-   ```bash
-   curl -sI https://payload.example.com/df01_freetube.apk | head -1          # expect 403
-   curl -sI -H "X-Payload-Auth: <secret>" https://payload.example.com/df01_freetube.apk | head -1   # expect 200
-   ```
+The clean fix is to move the desktop app onto the same `/api/plan` + signed `/dl`
+flow the web client uses; it already holds an activation token, so the change is
+in `app/download.py`, not in the protocol. Uploading the MAGE files to the public
+bucket would restore desktop MAGE installs but re-opens the hole for all three.
 
 ## 4. VPS: ship the CORS fix and the payload settings
 
