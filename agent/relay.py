@@ -44,7 +44,19 @@ from urllib.parse import urlparse, parse_qs
 try:
     import websockets
 except ImportError:
-    print("The 'websockets' package is missing.  pip install websockets")
+    print("The 'websockets' package is missing.  pip install 'websockets>=14'")
+    input("\nPress Enter to close…")
+    raise SystemExit(1)
+
+# This file uses the asyncio server API that websockets 14 made the default:
+# a single-argument handler and `ws.request.path`. On 13.x `websockets.serve`
+# is still the LEGACY implementation, which passes `(ws, path)` and has no
+# `.request` — so every connection would fail, mid-install, on the buyer's
+# machine. Fail here instead, where the message is readable. Build note in
+# agent/README.md: the exe must be frozen against websockets>=14.
+if tuple(int(p) for p in websockets.__version__.split(".")[:1]) < (14,):
+    print(f"This helper needs websockets 14 or newer "
+          f"(found {websockets.__version__}).  pip install -U 'websockets>=14'")
     input("\nPress Enter to close…")
     raise SystemExit(1)
 
@@ -147,25 +159,52 @@ def verify_token(api: str, token: str) -> bool:
 
 
 async def bridge(ws, tcp_reader, tcp_writer):
+    """Pump bytes both ways and REPORT how it ended.
+
+    The first field failure looked like "ExactReadable ended" in the browser,
+    which says only "the socket closed". The relay is the one process that knows
+    *why* — so it must say so, in this window, instead of swallowing it.
+    """
+    stats = {"up": 0, "down": 0, "why": "the website finished"}
+
     async def ws_to_tcp():
-        async for msg in ws:
-            if isinstance(msg, str):
-                msg = msg.encode()
-            tcp_writer.write(msg)
-            await tcp_writer.drain()
-        tcp_writer.close()
+        try:
+            async for msg in ws:
+                if isinstance(msg, str):
+                    msg = msg.encode()
+                stats["up"] += len(msg)
+                tcp_writer.write(msg)
+                await tcp_writer.drain()
+            stats["why"] = "the website closed the connection"
+        except Exception as e:
+            stats["why"] = f"the website's connection failed ({type(e).__name__}: {e})"
+            raise
+        finally:
+            try:
+                tcp_writer.close()
+            except Exception:
+                pass
 
     async def tcp_to_ws():
         try:
             while True:
                 data = await tcp_reader.read(65536)
                 if not data:
+                    stats["why"] = "the car closed the connection"
                     break
+                stats["down"] += len(data)
                 await ws.send(data)
+        except Exception as e:
+            stats["why"] = f"the car's connection failed ({type(e).__name__}: {e})"
+            raise
         finally:
-            await ws.close()
+            try:
+                await ws.close()
+            except Exception:
+                pass
 
-    await asyncio.gather(ws_to_tcp(), tcp_to_ws(), return_exceptions=True)
+    errs = await asyncio.gather(ws_to_tcp(), tcp_to_ws(), return_exceptions=True)
+    return stats, errs
 
 
 def make_handler(api: str, target_box: dict):
@@ -198,9 +237,26 @@ def make_handler(api: str, target_box: dict):
             say(f"  ✗ Lost the car at {ip}: {e}")
             say("    Its address may have changed. Press Connect again.")
             return
-        await bridge(ws, reader, writer)
-        say("  · finished with the car. You can close this window when the")
-        say("    website says the install is complete.")
+
+        # ADB is request/response. Nagle holds small packets waiting for more
+        # data that never comes, pairing with delayed ACK for ~40 ms of dead
+        # time on every exchange — thousands of them in one push.
+        sock = writer.get_extra_info("socket")
+        if sock is not None:
+            try:
+                sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+            except OSError:
+                pass
+
+        stats, errs = await bridge(ws, reader, writer)
+        say(f"  · link ended — {stats['why']}")
+        say(f"    ({stats['up'] // 1024} KB sent to the car, "
+            f"{stats['down'] // 1024} KB received)")
+        for e in errs:
+            if isinstance(e, BaseException) and not isinstance(e, asyncio.CancelledError):
+                say(f"    detail: {type(e).__name__}: {e}")
+        say("    If the website says the install stopped, press Connect there")
+        say("    again — it picks up from the step that failed.")
     return handler
 
 
@@ -239,7 +295,19 @@ async def main() -> None:
     say()
 
     try:
-        async with websockets.serve(make_handler(a.api, {"target": target}), HOST, PORT):
+        async with websockets.serve(
+            make_handler(a.api, {"target": target}), HOST, PORT,
+            # This is a raw binary tunnel on localhost. Deflating incompressible
+            # APK bytes burns CPU in the event loop for nothing, and stalling
+            # the loop is exactly what trips the keepalive below.
+            compression=None,
+            # Never police ADB frame sizes. The default 1 MiB cap sits right on
+            # the protocol's own maximum payload.
+            max_size=None,
+            # A busy push must not be mistaken for a dead peer.
+            ping_interval=20,
+            ping_timeout=60,
+        ):
             await asyncio.Future()
     except OSError as e:
         if getattr(e, "errno", None) in (48, 98, 10048):   # address already in use

@@ -1,0 +1,56 @@
+<!doctype html>
+<!-- Dev-only harness: runs the dropped-link scenarios against scripts/fake-relay.py
+     in a REAL browser, so console noise and WebSocket behaviour are the ones the
+     buyer would actually get. Not an app entry; vite.config.js builds index.html
+     only, so this never ships. -->
+<html lang="en">
+<head><meta charset="utf-8"><title>transport check</title></head>
+<body>
+<pre id="out">running…</pre>
+<script type="module">
+import { webSocketConnection } from "./transport.js";
+import { Consumable } from "@yume-chan/stream-extra";
+
+const out = document.getElementById("out");
+const log = (s) => { out.textContent += "\n" + s; };
+const noise = [];
+addEventListener("unhandledrejection", (e) => noise.push(e.reason?.message || String(e.reason)));
+
+const BASE = "ws://127.0.0.1:8799";
+const send = (w, v) => Consumable.WritableStream.write(w, v);
+const packet = (n) => ({ command: 0x45545257, arg0: 1, arg1: 1,
+  payload: new Uint8Array(n), checksum: 0, magic: 0x45545257 ^ 0xffffffff });
+const within = (ms, p) => Promise.race([p,
+  new Promise((_, rj) => setTimeout(() => rj(new Error("HUNG")), ms))]);
+
+out.textContent = "";
+try {
+  const { connection, link } = await webSocketConnection(`${BASE}/drop-after/1`);
+  const w = connection.writable.getWriter();
+  await send(w, packet(64)).catch(() => {});
+  await new Promise((r) => setTimeout(r, 500));
+  let settled = "hung";
+  try { await within(4000, send(w, packet(64))); settled = "resolved"; }
+  catch (e) { settled = e.message === "HUNG" ? "hung" : "rejected"; }
+  log(`write after drop: ${settled}`);
+  log(`link.dead: ${link.dead}`);
+  log(`reason: ${link.reason}`);
+} catch (e) { log("threw: " + e.message); }
+
+await new Promise((r) => setTimeout(r, 800));
+log(`unhandled rejections in browser: ${noise.length}`);
+noise.forEach((n) => log("  · " + n));
+
+// A car that walks out of Wi-Fi range never closes the socket — it just stops
+// answering. Nothing but the idle watchdog catches that, so prove it fires.
+// Takes IDLE_LIMIT_MS (30s) plus slack.
+log("waiting ~35s for the idle watchdog on a silent link…");
+const t0 = Date.now();
+const { link: quiet } = await webSocketConnection(`${BASE}/silent`);
+await new Promise((r) => setTimeout(r, 35000));
+log(`silent link dead after ${Math.round((Date.now() - t0) / 1000)}s: ${quiet.dead}`);
+log(`reason: ${quiet.reason}`);
+log("DONE");
+</script>
+</body>
+</html>

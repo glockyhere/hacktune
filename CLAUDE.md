@@ -193,12 +193,26 @@ GUI lives in `app/gui.py`. Style tokens (colors/fonts) are at the top. Suggested
 - [ ] **~~Upload the MAGE payload to R2~~** (superseded by the above) — `df01_freetube.apk`, `df02_yandexnavi.apk`
       are staged in `payload/` but NOT yet uploaded; `verify_cloud.py` will fail on
       them until they are. See `payload/UPLOAD.md` and `docs/DEPLOY.md` step 3.
-- [ ] **Web client — validate the ADB transport on hardware.** This is now the
-      LAST functional unknown. The bundle itself is fixed and proven: `npm run
-      build` produces `dist/assets/transport-*.js` with real ya-webadb in it, and
-      `connectUsb`/`connectRelay` resolve at runtime (verified in-browser). But no
-      ADB session has ever been driven from a browser. Try MAGE over USB first
-      (pure WebUSB, nothing to install), then B70 with `agent/relay.py`.
+- [x] **Web client — ADB transport reaches a real car.** On 2026-08-15 a B70
+      linked through `AxolotlRelay.exe`, reported `Android 9 · Wi-Fi`, loaded the
+      15-op plan and began the first push. It then died with a bare
+      `ExactReadable ended` and, on retry, FROZE at 7%. Two bugs, both ours:
+      (a) `transport.js` dropped the promise from `chunk.tryConsume(...)`, so a
+      send onto a closed socket looked like a SUCCESSFUL write — the packet
+      vanished and every later ADB call waited forever for a reply the car never
+      received; (b) nothing carried a reason, because ya-webadb's
+      `BufferedTransformStream.abort()` closes its buffer instead of erroring it,
+      flattening any upstream error into a clean end. Fixed by reporting through
+      `chunk.error()`, tearing the pipe down once via an AbortController, adding
+      a 30s idle watchdog, translating the relay's 4001/4004/4005 close codes,
+      and keeping the resume cursor across a relink. Covered by
+      `webapp/scripts/test-transport.mjs` + `fake-relay.py` (9 checks) and
+      verified in-browser via `webapp/transport-check.html`.
+- [ ] **Still unproven: a browser install that RUNS TO COMPLETION.** The link,
+      the plan and the first push are proven; no car has finished all 15 ops.
+      The B70 needs a rebuilt `AxolotlRelay.exe` for the new diagnostics (see
+      `agent/README.md`). MAGE over USB is still untried end to end and is the
+      cheaper test — pure WebUSB, nothing for the buyer to install.
 - [ ] **Deploy to the custom domain** — `docs/DEPLOY.md` is the runbook. Fill
       `deploy/production.env`, run `python deploy/configure.py`, then follow it.
       The VPS still runs the pre-CORS build, so the web client fails every call

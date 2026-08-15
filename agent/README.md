@@ -22,6 +22,31 @@ agent\build_relay.bat
 Produces `dist\AxolotlRelay.exe` — one file, no Python required on the buyer's
 machine. PyInstaller cannot cross-compile, so this has to run on Windows.
 
+**Freeze against `websockets>=14`.** `relay.py` uses the asyncio server API that
+14 made the default: a single-argument handler and `ws.request.path`. On 13.x
+`websockets.serve` is still the legacy implementation, which passes `(ws, path)`
+and has no `.request`, so **every** connection would fail on the buyer's machine
+with no clue why. The relay now refuses to start on an older version rather than
+letting that reach a customer, but check before building:
+
+```bat
+python -c "import websockets; print(websockets.__version__)"
+```
+
+## Reading the relay window when an install fails
+
+The window is the only place that knows *why* a link died — the browser sees
+nothing but a closed socket. It now prints, on every disconnect, which side
+closed, how many KB moved each way, and the underlying exception. That line is
+the first thing to ask a buyer for.
+
+| What it says | What it means |
+|---|---|
+| `the car closed the connection` | adbd hung up. Usually the unit slept, or Wireless ADB was toggled. |
+| `the car's connection failed (ConnectionResetError…)` | the Wi-Fi link dropped mid-transfer. |
+| `the website closed the connection` | the browser tab moved on. Normal at the end of an install. |
+| `0 KB sent to the car` | the bridge opened but ADB never got going — suspect the wrong device on port 5555. |
+
 ## What the buyer does
 
 1. Download `AxolotlRelay.exe`

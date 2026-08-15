@@ -564,6 +564,13 @@ async function connect() {
   $("device").dataset.state = "busy";
   $("device-name").textContent = "Linking…";
   $("btn-connect").disabled = true;
+  const prev = { profile: state.profile?.id, at: state.resumeFrom || 0,
+                 len: state.plan?.ops.length || 0 };
+  // Deliberately NOT awaited. Closing sends CLSE packets and waits for replies,
+  // so on the dead link we are reconnecting from it can hang forever — freezing
+  // the one action that recovers from a freeze.
+  state.adb?.close().catch(() => { /* stale link, nothing to close */ });
+  state.adb = null;
   try {
     let t;
     try { t = await transport(); }
@@ -599,12 +606,25 @@ async function connect() {
     $("btn-connect").disabled = false;
     tele(`linked · ${state.device}`, "ok");
 
+    // Refetched every link: the signed download URLs inside a plan expire.
     state.plan = await api("/api/plan", {
       method: "POST", headers: { "content-type": "application/json" },
       body: JSON.stringify({ token: state.token, profile: state.profile.id }),
     });
-    state.resumeFrom = 0;
+    // Relinking after a dropped Wi-Fi link must not replay everything. The ops
+    // are idempotent, but re-pushing ~100 MB over Wi-Fi is not free, and the
+    // buyer already watched it once. Same car, same plan shape: keep the cursor.
+    state.resumeFrom = prev.profile === state.profile.id
+      && prev.len === state.plan.ops.length ? prev.at : 0;
     buildPhases(state.plan);
+    if (state.resumeFrom > 0) {
+      state.phases.forEach((p) => {
+        if (p.ops[p.ops.length - 1] < state.resumeFrom) mark(p.key, "done", "DONE");
+      });
+      progress(state.resumeFrom / state.plan.ops.length);
+      tele(`resuming at operation ${state.resumeFrom + 1}`, "dim");
+      $("btn-install").lastChild.textContent = " Resume from this step";
+    }
     tele(`plan loaded · ${state.plan.ops.length} operations`, "dim");
     $("btn-install").disabled = false;
     // detection wins over the selection; say so rather than silently diverging
@@ -704,7 +724,16 @@ async function runInstall() {
       status("run-status", e.message, "err");
       tele("stopped · " + e.message, "er");
       $("tele").open = true;                // surface detail exactly when needed
-      $("btn-install").disabled = false;
+      // A dead link cannot be resumed over — pressing Resume would only fail
+      // again on the same op. Send them to Connect, which now keeps the cursor.
+      const gone = !state.adb || state.adb.dead;
+      if (gone) {
+        $("device").dataset.state = "off";
+        $("device-name").textContent = "Not linked";
+        $("btn-connect").textContent = "Connect";
+        tele("link lost · reconnect to resume from operation " + (i + 1), "er");
+      }
+      $("btn-install").disabled = gone;
       $("btn-install").lastChild.textContent = " Resume from this step";
       $("btn-connect").disabled = false;
       return;
