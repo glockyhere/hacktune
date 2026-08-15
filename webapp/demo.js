@@ -538,8 +538,16 @@ async function showHelper(car) {
 
   const url = CFG.RELAY_DOWNLOAD || "/AxolotlRelay.exe";
   const dl = $("helper-dl");
+  // A 200 is NOT enough. Cloudflare Pages answers any unmatched path with
+  // index.html and status 200, so a plain .ok check would happily offer a
+  // download that hands the buyer an HTML page renamed .exe — worse than a
+  // 404, because they would try to run it. Require a non-HTML content type.
   let ok = false;
-  try { ok = (await fetch(url, { method: "HEAD" })).ok; } catch { ok = false; }
+  try {
+    const r = await fetch(url, { method: "HEAD" });
+    const ct = (r.headers.get("content-type") || "").toLowerCase();
+    ok = r.ok && !ct.startsWith("text/html");
+  } catch { ok = false; }
 
   if (ok) {
     dl.href = url;
