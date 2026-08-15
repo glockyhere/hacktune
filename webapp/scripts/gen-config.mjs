@@ -20,6 +20,7 @@
 //   CARAPK_TELEGRAM       @handle
 //   CARAPK_PRICE_TEXT     200 000 so'm
 //   CARAPK_RELAY          optional, defaults to ws://127.0.0.1:8765
+//   CARAPK_RELAY_DOWNLOAD optional, defaults to /AxolotlRelay.exe
 import { writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
@@ -68,6 +69,7 @@ ${cards.map((c) => `      { brand: ${q(c.brand)}, number: ${q(c.number)} }`).joi
 
   // Local relay for WIRELESS cars (FAW B70). USB cars ignore this.
   RELAY: ${q(env.CARAPK_RELAY || "ws://127.0.0.1:8765")},
+  RELAY_DOWNLOAD: ${q(env.CARAPK_RELAY_DOWNLOAD || "/AxolotlRelay.exe")},
 };
 `;
 

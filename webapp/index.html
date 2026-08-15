@@ -146,6 +146,21 @@
     </div>
 
     <div class="deck--install">
+      <!-- B70 only: a wireless car cannot be reached by a browser, so the
+           buyer needs the small local bridge. Shown BEFORE Connect, because
+           discovering this from a failure after paying is the worst moment. -->
+      <div class="helper" id="helper" hidden>
+        <p class="helper-lead">This car connects over Wi-Fi. A browser can't reach it directly,
+          so one small helper does the bridging.</p>
+        <ol class="helper-steps">
+          <li>Download and open the helper</li>
+          <li>Leave its window open</li>
+          <li>Press Connect below</li>
+        </ol>
+        <a class="bar bar--sm helper-dl" id="helper-dl" href="#" download>Download the helper</a>
+        <p class="helper-note" id="helper-note">Windows may say the publisher is unknown.
+          Choose <b>More info</b>, then <b>Run anyway</b>.</p>
+      </div>
       <div class="device" id="device" data-state="off">
         <span id="device-name">No head unit linked</span>
         <button id="btn-connect" class="bar bar--sm" type="button">Connect</button>

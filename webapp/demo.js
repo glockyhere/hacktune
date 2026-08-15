@@ -525,6 +525,36 @@ function onApproved() {
     : "Enable Wireless ADB on the head unit and start the local agent, then press Connect.";
 }
 
+// A wireless car needs the local bridge, and the buyer must learn that BEFORE
+// pressing Connect — finding out from a failure after paying is the worst
+// possible moment. USB cars never see this. If the helper file is not actually
+// published yet, fall back to asking on Telegram rather than offering a link
+// that 404s, which would read as a broken product at the point of sale.
+async function showHelper(car) {
+  const box = $("helper");
+  if (!box) return;
+  if (car.via !== "relay") { box.hidden = true; return; }
+  box.hidden = false;
+
+  const url = CFG.RELAY_DOWNLOAD || "/AxolotlRelay.exe";
+  const dl = $("helper-dl");
+  let ok = false;
+  try { ok = (await fetch(url, { method: "HEAD" })).ok; } catch { ok = false; }
+
+  if (ok) {
+    dl.href = url;
+    dl.removeAttribute("aria-disabled");
+  } else {
+    const tg = String(CFG.CONTACTS?.telegram || "").trim().replace(/^@/, "");
+    dl.textContent = tg ? "Ask for the helper on Telegram" : "Helper unavailable";
+    if (tg) dl.href = "https://t.me/" + encodeURIComponent(tg);
+    else { dl.removeAttribute("href"); dl.setAttribute("aria-disabled", "true"); }
+    dl.removeAttribute("download");
+    $("helper-note").textContent =
+      "The helper download isn't published yet. Message us and we'll send it.";
+  }
+}
+
 // --- 3 connect -------------------------------------------------------------
 async function connect() {
   $("device").dataset.state = "busy";

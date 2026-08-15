@@ -20,6 +20,10 @@ window.CARAPK = {
   },
   PRICE_TEXT: "200 000 so'm",
 
+  // Where the FAW B70 helper (AxolotlRelay.exe) is published. Drop the
+  // built exe in webapp/public/ and this default just works.
+  RELAY_DOWNLOAD: "/AxolotlRelay.exe",
+
   // Local relay for WIRELESS cars (FAW B70). USB cars ignore this.
   RELAY: "ws://127.0.0.1:8765",
 };

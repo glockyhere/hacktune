@@ -408,6 +408,28 @@ body {
 }
 .pay-meta b { font-weight: 400; color: var(--ink); }
 
+/* helper (B70 only): the local bridge a wireless car needs */
+.helper {
+  border: 1px solid var(--edge); border-left: 1px solid var(--edge);
+  padding: 18px 19px; display: flex; flex-direction: column; gap: 13px;
+}
+.helper-lead { font: 400 15.5px/1.5 var(--grot); color: var(--ink-2); margin: 0; max-width: 62ch; }
+.helper-steps {
+  margin: 0; padding-left: 0; list-style: none; counter-reset: h;
+  display: flex; flex-direction: column; gap: 7px;
+}
+.helper-steps li {
+  counter-increment: h; display: flex; align-items: baseline; gap: 11px;
+  font: 400 15px/1.4 var(--grot); color: var(--ink-2);
+}
+.helper-steps li::before {
+  content: counter(h); flex: none;
+  font: 500 11px/1 var(--mono); letter-spacing: 0.1em; color: var(--lume);
+}
+.helper-dl { align-self: flex-start; text-decoration: none; }
+.helper-note { font: 400 13.5px/1.5 var(--grot); color: var(--ink-3); margin: 0; max-width: 62ch; }
+.helper-note b { font-weight: 500; color: var(--ink-2); }
+
 /* device */
 .device { display: flex; align-items: center; gap: 13px; border: 1px solid var(--edge); padding: 15px 17px; font: 400 15.5px/1.35 var(--grot); color: var(--ink-3); }
 .device::before { content: ""; width: 6px; height: 6px; background: var(--edge-hi); flex: none; }
