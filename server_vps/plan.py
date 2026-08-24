@@ -55,7 +55,11 @@ _NAVI_PERMS = [
     "android.permission.READ_EXTERNAL_STORAGE",
     "android.permission.WRITE_EXTERNAL_STORAGE",
     "android.permission.RECORD_AUDIO",
-    "android.permission.READ_PHONE_STATE",
+    # NOT READ_PHONE_STATE: neither Navi build declares it, so `pm grant`
+    # raises SecurityException. Confirmed on a MAGE 2026-08-24 and by
+    # reading both manifests. READ_EXTERNAL_STORAGE is absent from the
+    # manifests too but Android implicitly splits it out of
+    # WRITE_EXTERNAL_STORAGE, so granting that one does work.
 ]
 
 _DF_LAUNCHER_DB = "/data/user_de/0/com.dftc.launcher/databases/launcher.db"
@@ -103,8 +107,11 @@ def _mage_ops() -> list[dict]:
         # append, never overwrite: the unit has its own accessibility services
         {"op": "shell", "cmd": 'cur=$(settings get secure enabled_accessibility_services); case "$cur" in *nu.back.button*) :;; \'\'|null) settings put secure enabled_accessibility_services \'nu.back.button/nu.back.button.service.BackButtonService\';; *) settings put secure enabled_accessibility_services "$cur:nu.back.button/nu.back.button.service.BackButtonService";; esac'},
         {"op": "shell", "cmd": "settings put secure accessibility_enabled 1"},
-        # the overlay only starts after the app has been opened once
-        {"op": "shell", "cmd": "monkey -p nu.back.button -c android.intent.category.LAUNCHER 1"},
+        # The overlay only starts after the app has been opened once. NOT via
+        # `monkey`: on the MAGE that binary is a stub that prints its own
+        # argv and exits without launching anything, so the step silently did
+        # nothing. `am start` on the resolved activity actually launches it.
+        {"op": "shell", "cmd": "am start -n nu.back.button/.activity.WelcomeActivity"},
         _install("df03_antiradar.apk", G),
         *_grant("ru.yandex.yandexnavi"),
         *[{"op": "shell", "cmd": f"pm grant com.mybedy.antiradar {p}"}

@@ -68,7 +68,11 @@ NAVI_PERMS = [
     "android.permission.READ_EXTERNAL_STORAGE",
     "android.permission.WRITE_EXTERNAL_STORAGE",
     "android.permission.RECORD_AUDIO",
-    "android.permission.READ_PHONE_STATE",
+    # NOT READ_PHONE_STATE: neither Navi build declares it, so `pm grant`
+    # raises SecurityException. Confirmed on a MAGE 2026-08-24 and by
+    # reading both manifests. READ_EXTERNAL_STORAGE is absent from the
+    # manifests too but Android implicitly splits it out of
+    # WRITE_EXTERNAL_STORAGE, so granting that one does work.
 ]
 
 FAW_STEPS = [
@@ -109,7 +113,7 @@ def _faw_post_backbutton(serial: str, log: Log) -> None:
                 None, serial=serial, timeout=30)
     engine._adb(["shell", "settings put secure accessibility_enabled 1"],
                 None, serial=serial, timeout=30)
-    engine._adb(["shell", "monkey -p nu.back.button -c android.intent.category.LAUNCHER 1"],
+    engine._adb(["shell", "am start -n nu.back.button/.activity.WelcomeActivity"],
                 None, serial=serial, timeout=30)
     log("  ✓ floating back button enabled")
 
@@ -263,7 +267,7 @@ def _df_post_backbutton(serial: str, log: Log) -> None:
     _sh(serial, "settings put secure accessibility_enabled 1")
 
     # the service only starts once the app has been opened at least once
-    _sh(serial, "monkey -p nu.back.button -c android.intent.category.LAUNCHER 1")
+    _sh(serial, "am start -n nu.back.button/.activity.WelcomeActivity")
     log("  ✓ floating back button enabled")
 
 

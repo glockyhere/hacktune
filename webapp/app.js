@@ -792,8 +792,19 @@ async function execOp(op, i) {
     case "shell": {
       const cmd = op.op === "sqlite" ? `sqlite3 ${op.db} ${shq(op.stmt)}`
         : op.op === "settings" ? `settings put ${op.ns} ${op.key} ${op.value}` : op.cmd;
-      await adb.shell(cmd);
-      tele(op.op === "shell" ? "configure · permission · ok" : "menu · register · ok", "ok");
+      const out = (await adb.shell(cmd)).stdout || "";
+      // The none-protocol shell reports no exit code, so an unread output means
+      // a failed step reports success. A MAGE raised SecurityException on a
+      // `pm grant` for a permission the app never declared and this logged
+      // "ok" regardless. These steps are best-effort — a missing grant should
+      // not abandon a paid install — but it must be VISIBLE, not invented.
+      const bad = /Exception|Failure|error:|Error:|Denied/i.test(out);
+      if (bad) {
+        tele(`configure · ${out.split("\n")[0].slice(0, 70)}`, "er");
+        $("tele").open = true;
+      } else {
+        tele(op.op === "shell" ? "configure · permission · ok" : "menu · register · ok", "ok");
+      }
       return;
     }
     default: throw new Error("Unknown operation.");
