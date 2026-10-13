@@ -195,7 +195,8 @@ body {
 
 .picker-track {
   position: relative;
-  display: grid; grid-template-columns: repeat(3, minmax(0, 1fr));
+  --n: 4;                                   /* seats; JS sets --i to the chosen one */
+  display: grid; grid-template-columns: repeat(var(--n), minmax(0, 1fr));
   border: 1px solid var(--edge);
   background: var(--ground);
   isolation: isolate;
@@ -203,20 +204,19 @@ body {
 /* the moving part: one element that slides between the seats */
 .picker-ind {
   position: absolute; z-index: 0;
-  top: 0; bottom: 0; left: 0; width: calc(100% / 3);
+  top: 0; bottom: 0; left: 0; width: calc(100% / var(--n));
   background: oklch(0.845 0.145 82 / 0.07);
   border-bottom: 2px solid var(--lume);
-  transform: translateX(0);
+  transform: translateX(calc(var(--i, 0) * 100%));
   transition: transform 520ms var(--ease);
 }
-.picker-track[data-sel="1"] .picker-ind { transform: translateX(100%); }
-.picker-track[data-sel="2"] .picker-ind { transform: translateX(200%); }
 @media (prefers-reduced-motion: reduce) { .picker-ind { transition: none; } }
 
 .picker-opt {
   position: relative; z-index: 1;
   appearance: none; border: 0; background: none; cursor: pointer;
   display: flex; flex-direction: column; align-items: flex-start; gap: 6px;
+  justify-content: space-between;   /* a wrapped brand line never lifts the big name */
   padding: 20px 22px 22px;
   text-align: left;
   transition: color var(--med);
@@ -531,9 +531,10 @@ body {
   .slot::after { font-size: 9px; }
   .corelabel { letter-spacing: 0.1em; }
   /* the switch stays side-by-side (the seats are the whole idea); the spec stacks */
-  .picker-opt { padding: 15px 10px 17px; }
-  /* three seats on a narrow phone: the model name gives way, never the page */
-  .picker-opt i { font-size: clamp(22px, 8vw, 30px); }
+  /* four seats on a narrow phone: the names give way, never the page */
+  .picker-opt { padding: 14px 8px 16px; }
+  .picker-opt b { letter-spacing: 0.08em; font-size: 11px; line-height: 1.25; }
+  .picker-opt i { font-size: clamp(18px, 5.6vw, 26px); }
   .spec { grid-template-columns: 1fr; }
   .spec > div { flex-direction: row; justify-content: space-between; align-items: baseline; }
 }

@@ -5,10 +5,12 @@ plan is issued, so the seller can switch that car's UI language RU/ZH remotely.
   FLEET_URL        base URL of the fleet server (e.g. https://fleet.staldern.com)
   FLEET_ADMIN_KEY  its admin key (X-Admin-Key)
 
-One enrolment per activation (rid): a buyer who relinks and fetches the plan again
-gets the SAME car token, never a duplicate dashboard row. If the fleet server is
-unset or unreachable, enrol() returns None and the plan simply leaves the agent
-out; a paid install must never fail because of the seller's dashboard.
+One enrolment per CAR, keyed by VIN: the two L7 packages are separate purchases,
+and a car that buys both, or a buyer who relinks and fetches the plan again, must
+get the SAME token, never a duplicate dashboard row. (No VIN → keyed by the
+activation instead.) If the fleet server is unset or unreachable, enrol() returns
+None and the plan simply leaves the agent out; a paid install must never fail
+because of the seller's dashboard.
 """
 from __future__ import annotations
 import json
@@ -26,15 +28,23 @@ class Fleet:
         with sqlite3.connect(db_path) as c:
             c.execute("CREATE TABLE IF NOT EXISTS fleet_cars("
                       "rid TEXT PRIMARY KEY, car_id TEXT, token TEXT, created INTEGER)")
+            if "vin" not in [r[1] for r in c.execute("PRAGMA table_info(fleet_cars)")]:
+                c.execute("ALTER TABLE fleet_cars ADD COLUMN vin TEXT")
 
-    def enrol(self, rid: str, name: str) -> dict | None:
-        """{"server": FLEET_URL, "token": ...} for this activation, or None."""
+    def _known(self, key: str) -> str | None:
+        with sqlite3.connect(self.db_path) as c:
+            row = c.execute("SELECT token FROM fleet_cars WHERE vin=? ORDER BY created LIMIT 1",
+                            (key,)).fetchone()
+        return row[0] if row else None
+
+    def enrol(self, rid: str, vin: str, name: str) -> dict | None:
+        """{"server": FLEET_URL, "token": ...} for this car, or None."""
         if not (FLEET_URL and FLEET_ADMIN_KEY):
             return None
-        with sqlite3.connect(self.db_path) as c:
-            row = c.execute("SELECT token FROM fleet_cars WHERE rid=?", (rid,)).fetchone()
-        if row:
-            return {"server": FLEET_URL, "token": row[0]}
+        key = (vin or "").strip().upper() or f"rid:{rid}"
+        token = self._known(key)
+        if token:
+            return {"server": FLEET_URL, "token": token}
         try:
             req = urllib.request.Request(
                 f"{FLEET_URL}/api/v1/admin/cars", method="POST",
@@ -46,8 +56,7 @@ class Fleet:
             print(f"fleet enrol failed for {rid}: {e}", flush=True)
             return None
         with sqlite3.connect(self.db_path) as c:
-            c.execute("INSERT OR IGNORE INTO fleet_cars(rid,car_id,token,created) "
-                      "VALUES(?,?,?,strftime('%s','now'))", (rid, car["id"], car["token"]))
-            # two simultaneous first fetches: both cars get whichever token won
-            token = c.execute("SELECT token FROM fleet_cars WHERE rid=?", (rid,)).fetchone()[0]
-        return {"server": FLEET_URL, "token": token}
+            c.execute("INSERT OR IGNORE INTO fleet_cars(rid,car_id,token,created,vin) "
+                      "VALUES(?,?,?,strftime('%s','now'),?)", (rid, car["id"], car["token"], key))
+        # two simultaneous first fetches: both get whichever enrolment came first
+        return {"server": FLEET_URL, "token": self._known(key) or car["token"]}

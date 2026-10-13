@@ -178,41 +178,71 @@ def _l7_agent_ops(fleet: dict) -> list[dict]:
                 f"chmod 755 {d}/l7agent.sh && "
                 f"[ \"$(sha256sum {d}/l7agent.sh | cut -d' ' -f1)\" = {sha} ] || "
                 "echo 'Error: language agent script corrupted'"},
+        # A car that already runs the agent (it bought the other L7 package
+        # first) gets the same token again; stop the old instance so exactly one
+        # agent polls. Its trap removes the lock; rm is for a stale one.
         {"op": "shell", "phase": R,
          "cmd": f"printf 'SERVER=%s\\nTOKEN=%s\\n' '{fleet['server']}' '{fleet['token']}' > {d}/config"
-                f" && chmod 644 {d}/config && rm -rf {d}/lock.d"},
+                f" && chmod 644 {d}/config && "
+                f"{{ [ -f {d}/lock.d/pid ] && kill $(cat {d}/lock.d/pid) 2>/dev/null; sleep 1; "
+                f"rm -rf {d}/lock.d; }}"},
         {"op": "shell", "phase": R,
          "cmd": "am start-foreground-service -n uz.l7ru.langagent/.AgentService"},
     ]
     return ops
 
 
-def _l7_ops(ctx: dict | None = None) -> list[dict]:
-    G = ["-r", "-g"]
+# The L7 is sold as two separate packages. Each starts with the same gate and
+# ends with the agent (when the dashboard is up) and a restart.
+_L7_GATE = [
+    {"op": "root"},
+    {"op": "require", "prop": "ro.build.fingerprint", "contains": _L7_FIRMWARE,
+     "message": "This head unit runs a firmware version Axolotl doesn't support yet. "
+                "Nothing was installed. Message us with a photo of its software version."},
+]
+
+
+def _l7_finish(ctx: dict | None) -> list[dict]:
     fleet = (ctx or {}).get("fleet")
-    overlays = sorted(f for f in _L7_PAYLOAD if f.startswith("l7ru_"))
-    L, M = "language", "menu"
     return [
-        {"op": "root"},
-        {"op": "require", "prop": "ro.build.fingerprint", "contains": _L7_FIRMWARE,
-         "message": "This head unit runs a firmware version Axolotl doesn't support yet. "
-                    "Nothing was installed. Message us with a photo of its software version."},
-        # Russian interface: overlays live in /data, the system partitions are untouched
+        # remote language control (seller's fleet dashboard); skipped if it's down
+        *(_l7_agent_ops(fleet) if fleet else []),
+        # restart so the changes appear. Delayed and detached: the browser marks
+        # the session done and unlinks before the car goes down.
+        {"op": "shell", "phase": "restart",
+         "cmd": "setsid sh -c 'sleep 20; reboot' </dev/null >/dev/null 2>&1 &"},
+    ]
+
+
+def _l7_ru_ops(ctx: dict | None = None) -> list[dict]:
+    """Russian interface: overlays live in /data, the system partitions are untouched."""
+    overlays = sorted(f for f in _L7_PAYLOAD if f.startswith("l7ru_"))
+    L = "language"
+    return [
+        *_L7_GATE,
         *[_install(f, ["-r"]) | {"phase": L} for f in overlays],
         {"op": "shell", "phase": L,
          "cmd": "for p in $(cmd overlay list | grep -o 'uz\\.l7ru\\.overlay\\.[A-Za-z0-9_.]*'); "
                 "do cmd overlay enable --user 0 $p; done"},
         {"op": "setprop", "phase": L, "key": "persist.sys.locale", "value": "ru-RU"},
         {"op": "settings", "phase": L, "ns": "system", "key": "system_locales", "value": "ru-RU"},
-        # apps (Navi and Antiradar are the MAGE builds: original signatures)
+        *_l7_finish(ctx),
+    ]
+
+
+def _l7_apps_ops(ctx: dict | None = None) -> list[dict]:
+    """Navi, Antiradar, FreeTube + their tiles in the stock all-apps grid."""
+    G = ["-r", "-g"]
+    M = "menu"
+    return [
+        *_L7_GATE,
+        # Navi and Antiradar are the MAGE builds: original signatures
         _install("df02_yandexnavi.apk", G),
         *_grant("ru.yandex.yandexnavi"),
         _install("df03_antiradar.apk", G),
         *[{"op": "shell", "cmd": f"pm grant com.mybedy.antiradar {p}"} for p in _ANTIRADAR_PERMS],
         {"op": "shell", "phase": "apps", "cmd": "appops set com.mybedy.antiradar SYSTEM_ALERT_WINDOW allow"},
         _install("l7_freetube.apk", ["-r"]),
-        # remote language control (seller's fleet dashboard); skipped if it's down
-        *(_l7_agent_ops(fleet) if fleet else []),
         # all-apps tiles: SystemUI is persistent, so only a STAGED install may
         # update it; it applies on the next boot. Drop any half-finished earlier
         # staged session first, or the new one is refused.
@@ -221,19 +251,30 @@ def _l7_ops(ctx: dict | None = None) -> list[dict]:
                 "'s/.*sessionId = \\([0-9]*\\); isStaged = true; isStagedSessionReady = true.*/\\1/p'); "
                 "do pm install-abandon $id; done"},
         _install("l7_systemui.apk", ["--staged", "--enable-rollback"]) | {"phase": M},
-        # restart so the tiles and the Russian UI appear. Delayed and detached:
-        # the browser marks the session done and unlinks before the car goes down.
-        {"op": "shell", "phase": "restart",
-         "cmd": "setsid sh -c 'sleep 20; reboot' </dev/null >/dev/null 2>&1 &"},
+        *_l7_finish(ctx),
     ]
 
+
+_L7_RU_FILES = {f for f in _L7_PAYLOAD if f.startswith("l7ru_")} | {"l7_langagent.apk"}
+_L7_APPS_FILES = {"l7_freetube.apk", "l7_systemui.apk", "l7_langagent.apk"}
 
 RECIPES = {
     "faw_b70":       {"name": "FAW B70 (ECARX)",      "connection": "wireless", "build": _faw_ops},
     "dongfeng_mage": {"name": "Dongfeng Aeolus MAGE", "connection": "usb",      "build": _mage_ops},
-    # web only: the desktop app has no L7 profile (check_recipe.py skips it)
-    "dongfeng_l7":   {"name": "Dongfeng Aeolus L7",   "connection": "usb",      "build": _l7_ops,
-                      "ctx": True, "web_only": True, "files": set(_L7_PAYLOAD)},
+    # The two L7 packages are separate purchases: an activation is only good for
+    # the package it was requested for (its token's `model`, set by the client's
+    # picker), which main.py enforces. Web only: no desktop profile
+    # (check_recipe.py skips web_only recipes' own files).
+    "dongfeng_l7_ru":   {"name": "Dongfeng Aeolus L7 · Russian interface", "connection": "usb",
+                         "build": _l7_ru_ops, "ctx": True, "web_only": True, "files": _L7_RU_FILES,
+                         "model": "L7 RU",
+                         "done": "The head unit restarts by itself in about 20 seconds and "
+                                 "comes back in Russian."},
+    "dongfeng_l7_apps": {"name": "Dongfeng Aeolus L7 · Apps", "connection": "usb",
+                         "build": _l7_apps_ops, "ctx": True, "web_only": True, "files": _L7_APPS_FILES,
+                         "model": "L7 Apps",
+                         "done": "The head unit restarts by itself in about 20 seconds. Navigator, "
+                                 "ContraCam and FreeTube then have their own tiles under All apps."},
 }
 
 
@@ -291,4 +332,5 @@ def build_plan(profile_id: str, rid: str, hmac_key: bytes, ttl: int = 900,
         "connection": rec["connection"],
         "ops": ops,
         "expires_in": ttl,
+        **({"done": rec["done"]} if rec.get("done") else {}),
     }

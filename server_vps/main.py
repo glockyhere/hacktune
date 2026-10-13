@@ -153,10 +153,15 @@ async def api_plan(req: Request):
     profile = b.get("profile", "")
     if profile not in plan_mod.RECIPES:
         raise HTTPException(status_code=400, detail="unknown profile")
+    rec = plan_mod.RECIPES[profile]
+    # separately sold packages: the activation must be for THIS one
+    if rec.get("model") and payload.get("model") != rec["model"]:
+        raise HTTPException(status_code=403, detail="this activation is for a different package")
     ctx = None
-    if profile == "dongfeng_l7":
-        name = " ".join(x for x in (payload.get("make"), payload.get("model"), payload.get("vin")) if x)
-        ctx = {"fleet": await asyncio.to_thread(fleet.enrol, payload["rid"], name or payload["rid"])}
+    if rec.get("ctx"):
+        vin = payload.get("vin", "")
+        name = " ".join(x for x in (payload.get("make"), "L7", vin) if x)
+        ctx = {"fleet": await asyncio.to_thread(fleet.enrol, payload["rid"], vin, name)}
     return plan_mod.build_plan(profile, payload["rid"], DOWNLOAD_HMAC_KEY, DOWNLOAD_TTL, ctx=ctx)
 
 

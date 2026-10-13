@@ -154,6 +154,10 @@ document.querySelectorAll(".card[data-card]").forEach((card) => {
 // Dongfeng units are provisioned over a USB cable, the B70 over Wireless ADB.
 // Telling the user that here is why the selector exists instead of two text
 // fields. `howto` is shown once approved, before they hunt for the right port.
+const L7_HOWTO = "Turn on ADB: Settings → System → information page → tap \u201cMCU version\u201d "
+  + "5 times quickly → password HelloFengshen2023 → switch ADB on. Then connect the head "
+  + "unit with a USB cable and press Connect. When the install finishes, the head unit "
+  + "restarts by itself.";
 const CARS = {
   dongfeng_mage: { brand: "Aeolus", model: "MAGE", make: "Dongfeng",
                    os: "11", link: "USB cable", via: "usb",
@@ -161,15 +165,16 @@ const CARS = {
   faw_b70:       { brand: "FAW", model: "B70", make: "FAW",
                    os: "9", link: "Wireless ADB", via: "relay",
                    apps: ["back button", "media", "Wi-Fi tile", "navigation", "home screen"] },
+  // The L7 is sold as two separate packages; `model` goes into the activation
+  // request and the server only hands each approved token its own package.
   // ADB is hidden behind the engineering menu and switches itself off on every
   // restart, so the buyer must turn it on right before connecting.
-  dongfeng_l7:   { brand: "Aeolus", model: "L7", make: "Dongfeng",
-                   os: "10", link: "USB cable", via: "usb",
-                   apps: ["Russian interface", "navigation", "antiradar", "media", "app tiles"],
-                   howto: "Turn on ADB: Settings → System → information page → tap \u201cMCU version\u201d "
-                        + "5 times quickly → password HelloFengshen2023 → switch ADB on. Then connect "
-                        + "the head unit with a USB cable and press Connect. When the install "
-                        + "finishes, the head unit restarts by itself." },
+  dongfeng_l7_ru:   { brand: "Aeolus L7", model: "L7 RU", make: "Dongfeng",
+                      os: "10", link: "USB cable", via: "usb", howto: L7_HOWTO,
+                      summary: "Russian UI", apps: ["Russian interface", "remote language control"] },
+  dongfeng_l7_apps: { brand: "Aeolus L7", model: "L7 Apps", make: "Dongfeng",
+                      os: "10", link: "USB cable", via: "usb", howto: L7_HOWTO,
+                      apps: ["navigation", "antiradar", "media", "app tiles"] },
 };
 const CAR_IDS = Object.keys(CARS);
 const track = $("picker-track");
@@ -180,6 +185,7 @@ function selectCar(id, { focus = false } = {}) {
   if (i < 0) return;
   state.car = id;
   track.dataset.sel = String(i);
+  track.style.setProperty("--i", String(i));     // the indicator slides to seat i
   opts.forEach((o, n) => {
     const on = n === i;
     o.setAttribute("aria-checked", String(on));
@@ -189,7 +195,7 @@ function selectCar(id, { focus = false } = {}) {
   const c = CARS[id];
   $("sp-os").textContent = "Android " + c.os;
   $("sp-link").textContent = c.link;
-  $("sp-apps").textContent = `${c.apps.length} apps`;
+  $("sp-apps").textContent = c.summary || `${c.apps.length} apps`;
   $("spec").title = c.apps.join(", ");
   // roll the spec over so the change is felt, not just swapped
   const spec = $("spec");
@@ -660,16 +666,19 @@ async function connect() {
 
 function pickProfile(model, dev) {
   const m = (model + " " + dev).toLowerCase();
-  // the L7's Qualcomm build never renamed its product: "trinket for arm64"
-  if (m.includes("trinket"))
-    return { id: "dongfeng_l7", name: "Dongfeng Aeolus L7" };
+  // The L7's Qualcomm build never renamed its product: "trinket for arm64".
+  // Hardware can't tell which package was bought, so keep the selected one.
+  if (m.includes("trinket")) {
+    const id = String(state.car).startsWith("dongfeng_l7") ? state.car : "dongfeng_l7_ru";
+    return { id, name: `Dongfeng Aeolus ${CARS[id].model}` };
+  }
   if (m.includes("dongfeng") || m.includes("aeolus") || m.includes("spm8675"))
     return { id: "dongfeng_mage", name: "Dongfeng Aeolus MAGE" };
   return { id: "faw_b70", name: "FAW B70" };
 }
 const friendly = (id, model) =>
   id === "dongfeng_mage" ? "Dongfeng MAGE" : id === "faw_b70" ? "FAW B70"
-  : id === "dongfeng_l7" ? "Dongfeng L7" : model;
+  : CARS[id] ? `Dongfeng ${CARS[id].model}` : model;
 
 // --- phases ----------------------------------------------------------------
 const PHASE_META = { prepare: "Preparing the head unit", apps: "Installing apps", menu: "Setting up the menu",
@@ -779,6 +788,8 @@ async function runInstall() {
 function buildRecap() {
   const rows = [["VIN", state.vin || "—"], ["VEHICLE", `${state.make || ""} ${state.model || ""}`.trim() || "—"],
                 ["HEAD UNIT", state.device || "—"], ["OPERATIONS", String(state.plan.ops.length)]];
+  // what happens next, when the recipe has something to say (the L7 reboots)
+  if (state.plan.done) rows.push(["NEXT", state.plan.done]);
   $("recap").innerHTML = rows.map(([k, v]) =>
     `<div><dt>${k}</dt><dd>${escapeHtml(v)}</dd></div>`).join("");
 }
