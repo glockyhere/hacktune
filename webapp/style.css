@@ -195,7 +195,7 @@ body {
 
 .picker-track {
   position: relative;
-  display: grid; grid-template-columns: repeat(3, 1fr);
+  display: grid; grid-template-columns: repeat(3, minmax(0, 1fr));
   border: 1px solid var(--edge);
   background: var(--ground);
   isolation: isolate;
@@ -530,8 +530,10 @@ body {
   .slots { gap: 2px; }
   .slot::after { font-size: 9px; }
   .corelabel { letter-spacing: 0.1em; }
-  /* the switch stays side-by-side (two seats is the whole idea); the spec stacks */
-  .picker-opt { padding: 15px 14px 17px; }
+  /* the switch stays side-by-side (the seats are the whole idea); the spec stacks */
+  .picker-opt { padding: 15px 10px 17px; }
+  /* three seats on a narrow phone: the model name gives way, never the page */
+  .picker-opt i { font-size: clamp(22px, 8vw, 30px); }
   .spec { grid-template-columns: 1fr; }
   .spec > div { flex-direction: row; justify-content: space-between; align-items: baseline; }
 }
