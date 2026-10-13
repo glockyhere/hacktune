@@ -18,6 +18,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
 
 import plan as plan_mod
+from fleet import Fleet
 from store import Store
 from telegram import Bot
 
@@ -50,6 +51,7 @@ PAYLOAD_AUTH = os.environ.get("PAYLOAD_AUTH", "").strip()
 WEB_ORIGINS = [o.strip() for o in os.environ.get("WEB_ORIGINS", "*").split(",") if o.strip()] or ["*"]
 
 store = Store(DB_PATH, os.environ.get("SIGNING_KEY_PKCS8", ""))
+fleet = Fleet(DB_PATH)   # L7 remote-language enrolment (FLEET_URL / FLEET_ADMIN_KEY)
 bot = Bot(TG_BOT_TOKEN, TG_CHAT_ID, store) if (TG_BOT_TOKEN and TG_CHAT_ID) else None
 
 app = FastAPI()
@@ -151,7 +153,11 @@ async def api_plan(req: Request):
     profile = b.get("profile", "")
     if profile not in plan_mod.RECIPES:
         raise HTTPException(status_code=400, detail="unknown profile")
-    return plan_mod.build_plan(profile, payload["rid"], DOWNLOAD_HMAC_KEY, DOWNLOAD_TTL)
+    ctx = None
+    if profile == "dongfeng_l7":
+        name = " ".join(x for x in (payload.get("make"), payload.get("model"), payload.get("vin")) if x)
+        ctx = {"fleet": await asyncio.to_thread(fleet.enrol, payload["rid"], name or payload["rid"])}
+    return plan_mod.build_plan(profile, payload["rid"], DOWNLOAD_HMAC_KEY, DOWNLOAD_TTL, ctx=ctx)
 
 
 @app.post("/api/verify")

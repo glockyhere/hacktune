@@ -25,7 +25,9 @@ from __future__ import annotations
 import base64
 import hashlib
 import hmac
+import json
 import time
+from pathlib import Path
 
 # --------------------------------------------------------------------------- #
 #  Payload pins. Must match app/profiles.py and the files on the origin.
@@ -137,9 +139,101 @@ def _mage_ops() -> list[dict]:
     ]
 
 
+# --------------------------------------------------------------------------- #
+#  Dongfeng Aeolus L7 (Qualcomm trinket, Android 10 userdebug, root adb).
+#  See docs/DONGFENG_L7.md. Payload pins live in l7/payload.json: 49 Russian
+#  RRO overlays (l7ru_<target>.apk), FreeTube with a 64 px top inset (the L7
+#  status bar reserves no space), the patched SystemUI that adds a tile per
+#  user-installed app to the stock all-apps grid, and the fleet agent launcher.
+# --------------------------------------------------------------------------- #
+_L7_DIR = Path(__file__).with_name("l7")
+_L7_PAYLOAD = json.loads((_L7_DIR / "payload.json").read_text())
+PAYLOAD.update(_L7_PAYLOAD)
+# SystemUI-tiles is a patch of this exact build's SystemUI: never run elsewhere.
+_L7_FIRMWARE = "QKQ1.210910.001/75:userdebug"
+_L7_AGENT_DIR = "/data/local/l7agent"
+
+
+def _l7_agent_ops(fleet: dict) -> list[dict]:
+    """Push l7agent.sh + its config and start it via the boot launcher.
+
+    The plan can only `install` APKs, so the script travels as base64 in shell
+    ops (small chunks keep every adb command line short) and is checked against
+    its SHA-256 on the car before use.
+    """
+    script = (_L7_DIR / "l7agent.sh").read_bytes()
+    b64 = base64.b64encode(script).decode()
+    sha = hashlib.sha256(script).hexdigest()
+    d, R = _L7_AGENT_DIR, "remote"
+    ops = [
+        _install("l7_langagent.apk", ["-r"]) | {"phase": R},
+        {"op": "shell", "phase": R,
+         "cmd": f"mkdir -p {d} && chmod 777 {d} && : > {d}/l7agent.b64"},
+    ]
+    ops += [{"op": "shell", "phase": R, "cmd": f"printf '%s' '{b64[i:i + 2000]}' >> {d}/l7agent.b64"}
+            for i in range(0, len(b64), 2000)]
+    ops += [
+        {"op": "shell", "phase": R,
+         "cmd": f"base64 -d {d}/l7agent.b64 > {d}/l7agent.sh && rm -f {d}/l7agent.b64 && "
+                f"chmod 755 {d}/l7agent.sh && "
+                f"[ \"$(sha256sum {d}/l7agent.sh | cut -d' ' -f1)\" = {sha} ] || "
+                "echo 'Error: language agent script corrupted'"},
+        {"op": "shell", "phase": R,
+         "cmd": f"printf 'SERVER=%s\\nTOKEN=%s\\n' '{fleet['server']}' '{fleet['token']}' > {d}/config"
+                f" && chmod 644 {d}/config && rm -rf {d}/lock.d"},
+        {"op": "shell", "phase": R,
+         "cmd": "am start-foreground-service -n uz.l7ru.langagent/.AgentService"},
+    ]
+    return ops
+
+
+def _l7_ops(ctx: dict | None = None) -> list[dict]:
+    G = ["-r", "-g"]
+    fleet = (ctx or {}).get("fleet")
+    overlays = sorted(f for f in _L7_PAYLOAD if f.startswith("l7ru_"))
+    L, M = "language", "menu"
+    return [
+        {"op": "root"},
+        {"op": "require", "prop": "ro.build.fingerprint", "contains": _L7_FIRMWARE,
+         "message": "This head unit runs a firmware version Axolotl doesn't support yet. "
+                    "Nothing was installed. Message us with a photo of its software version."},
+        # Russian interface: overlays live in /data, the system partitions are untouched
+        *[_install(f, ["-r"]) | {"phase": L} for f in overlays],
+        {"op": "shell", "phase": L,
+         "cmd": "for p in $(cmd overlay list | grep -o 'uz\\.l7ru\\.overlay\\.[A-Za-z0-9_.]*'); "
+                "do cmd overlay enable --user 0 $p; done"},
+        {"op": "setprop", "phase": L, "key": "persist.sys.locale", "value": "ru-RU"},
+        {"op": "settings", "phase": L, "ns": "system", "key": "system_locales", "value": "ru-RU"},
+        # apps (Navi and Antiradar are the MAGE builds: original signatures)
+        _install("df02_yandexnavi.apk", G),
+        *_grant("ru.yandex.yandexnavi"),
+        _install("df03_antiradar.apk", G),
+        *[{"op": "shell", "cmd": f"pm grant com.mybedy.antiradar {p}"} for p in _ANTIRADAR_PERMS],
+        {"op": "shell", "phase": "apps", "cmd": "appops set com.mybedy.antiradar SYSTEM_ALERT_WINDOW allow"},
+        _install("l7_freetube.apk", ["-r"]),
+        # remote language control (seller's fleet dashboard); skipped if it's down
+        *(_l7_agent_ops(fleet) if fleet else []),
+        # all-apps tiles: SystemUI is persistent, so only a STAGED install may
+        # update it; it applies on the next boot. Drop any half-finished earlier
+        # staged session first, or the new one is refused.
+        {"op": "shell", "phase": M,
+         "cmd": "for id in $(pm get-stagedsessions | sed -n "
+                "'s/.*sessionId = \\([0-9]*\\); isStaged = true; isStagedSessionReady = true.*/\\1/p'); "
+                "do pm install-abandon $id; done"},
+        _install("l7_systemui.apk", ["--staged", "--enable-rollback"]) | {"phase": M},
+        # restart so the tiles and the Russian UI appear. Delayed and detached:
+        # the browser marks the session done and unlinks before the car goes down.
+        {"op": "shell", "phase": "restart",
+         "cmd": "setsid sh -c 'sleep 20; reboot' </dev/null >/dev/null 2>&1 &"},
+    ]
+
+
 RECIPES = {
     "faw_b70":       {"name": "FAW B70 (ECARX)",      "connection": "wireless", "build": _faw_ops},
     "dongfeng_mage": {"name": "Dongfeng Aeolus MAGE", "connection": "usb",      "build": _mage_ops},
+    # web only: the desktop app has no L7 profile (check_recipe.py skips it)
+    "dongfeng_l7":   {"name": "Dongfeng Aeolus L7",   "connection": "usb",      "build": _l7_ops,
+                      "ctx": True, "web_only": True, "files": set(_L7_PAYLOAD)},
 }
 
 
@@ -178,12 +272,16 @@ def verify_url(file: str, rid: str, exp: str, sig: str, hmac_key: bytes,
 
 
 def build_plan(profile_id: str, rid: str, hmac_key: bytes, ttl: int = 900,
-               now: int | None = None) -> dict:
-    """The full session plan: metadata + ops with signed URLs injected."""
+               now: int | None = None, ctx: dict | None = None) -> dict:
+    """The full session plan: metadata + ops with signed URLs injected.
+
+    ctx carries per-session values for recipes that declare "ctx" (the L7's
+    fleet token); the others take no arguments.
+    """
     rec = RECIPES.get(profile_id)
     if not rec:
         raise KeyError(f"unknown profile {profile_id!r}")
-    ops = rec["build"]()
+    ops = rec["build"](ctx) if rec.get("ctx") else rec["build"]()
     for op in ops:
         if op["op"] == "install":
             op["url"] = sign_url(op["file"], rid, hmac_key, ttl, now)

@@ -26,8 +26,14 @@ def main() -> int:
     # 1. payload hashes identical and same file set
     desktop = {s["file"]: s["sha256"]
                for p in profiles.PROFILES.values() for s in p["steps"]}
-    if set(desktop) != set(plan.PAYLOAD):
-        problems.append(f"file sets differ: {set(desktop) ^ set(plan.PAYLOAD)}")
+    # recipes marked web_only (the L7) have no desktop twin; their own files are
+    # exempt, but any file they share with a desktop recipe is still checked
+    shared = {o["file"] for r in plan.RECIPES.values() if not r.get("web_only")
+              for o in r["build"]() if o["op"] == "install"}
+    web_only = {f for r in plan.RECIPES.values() if r.get("web_only")
+                for f in r.get("files", ())} - shared
+    if set(desktop) != set(plan.PAYLOAD) - web_only:
+        problems.append(f"file sets differ: {set(desktop) ^ (set(plan.PAYLOAD) - web_only)}")
     for f, h in desktop.items():
         if plan.PAYLOAD.get(f) != h:
             problems.append(f"hash drift for {f}")
@@ -39,6 +45,8 @@ def main() -> int:
 
     # 3. install flags per file match between the two recipes
     for pid, rec in plan.RECIPES.items():
+        if rec.get("web_only"):
+            continue
         server_flags = {o["file"]: o["flags"]
                         for o in rec["build"]() if o["op"] == "install"}
         desktop_flags = {s["file"]: profiles.get(pid).get("install_flags", ["-r", "-d"])

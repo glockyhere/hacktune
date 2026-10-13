@@ -150,9 +150,10 @@ document.querySelectorAll(".card[data-card]").forEach((card) => {
 }
 
 // --- vehicle selector ------------------------------------------------------
-// Two supported cars. The differences are real and worth showing up front:
-// the MAGE is provisioned over a USB cable, the B70 over Wireless ADB. Telling
-// the user that here is why the selector exists instead of two text fields.
+// Supported cars. The differences are real and worth showing up front: the
+// Dongfeng units are provisioned over a USB cable, the B70 over Wireless ADB.
+// Telling the user that here is why the selector exists instead of two text
+// fields. `howto` is shown once approved, before they hunt for the right port.
 const CARS = {
   dongfeng_mage: { brand: "Aeolus", model: "MAGE", make: "Dongfeng",
                    os: "11", link: "USB cable", via: "usb",
@@ -160,6 +161,15 @@ const CARS = {
   faw_b70:       { brand: "FAW", model: "B70", make: "FAW",
                    os: "9", link: "Wireless ADB", via: "relay",
                    apps: ["back button", "media", "Wi-Fi tile", "navigation", "home screen"] },
+  // ADB is hidden behind the engineering menu and switches itself off on every
+  // restart, so the buyer must turn it on right before connecting.
+  dongfeng_l7:   { brand: "Aeolus", model: "L7", make: "Dongfeng",
+                   os: "10", link: "USB cable", via: "usb",
+                   apps: ["Russian interface", "navigation", "antiradar", "media", "app tiles"],
+                   howto: "Turn on ADB: Settings → System → information page → tap \u201cMCU version\u201d "
+                        + "5 times quickly → password HelloFengshen2023 → switch ADB on. Then connect "
+                        + "the head unit with a USB cable and press Connect. When the install "
+                        + "finishes, the head unit restarts by itself." },
 };
 const CAR_IDS = Object.keys(CARS);
 const track = $("picker-track");
@@ -511,7 +521,7 @@ function onApproved() {
   scale(0); $("pct").textContent = "0";
   // tell the user HOW to connect this specific car, before they hunt for it
   const c = CARS[state.car];
-  $("phase-idle").textContent = c.link === "USB cable"
+  $("phase-idle").textContent = c.howto ? c.howto : c.link === "USB cable"
     ? "Connect the head unit with a USB cable, then press Connect."
     : "Enable Wireless ADB on the head unit and start the local agent, then press Connect.";
   showHelper(c);
@@ -650,23 +660,35 @@ async function connect() {
 
 function pickProfile(model, dev) {
   const m = (model + " " + dev).toLowerCase();
+  // the L7's Qualcomm build never renamed its product: "trinket for arm64"
+  if (m.includes("trinket"))
+    return { id: "dongfeng_l7", name: "Dongfeng Aeolus L7" };
   if (m.includes("dongfeng") || m.includes("aeolus") || m.includes("spm8675"))
     return { id: "dongfeng_mage", name: "Dongfeng Aeolus MAGE" };
   return { id: "faw_b70", name: "FAW B70" };
 }
 const friendly = (id, model) =>
-  id === "dongfeng_mage" ? "Dongfeng MAGE" : id === "faw_b70" ? "FAW B70" : model;
+  id === "dongfeng_mage" ? "Dongfeng MAGE" : id === "faw_b70" ? "FAW B70"
+  : id === "dongfeng_l7" ? "Dongfeng L7" : model;
 
 // --- phases ----------------------------------------------------------------
-const PHASE_META = { prepare: "Preparing the head unit", apps: "Installing apps", menu: "Setting up the menu" };
+const PHASE_META = { prepare: "Preparing the head unit", apps: "Installing apps", menu: "Setting up the menu",
+                     language: "Installing the Russian interface", remote: "Enabling remote language control",
+                     restart: "Restarting the head unit" };
 const APP_LABEL = {
   "01_backbutton.apk": "back button", "02_freetube.apk": "media",
   "03_wifishortcut.apk": "Wi-Fi shortcut", "04_yandexnavi.apk": "navigation",
   "05_launcher.apk": "home screen", "df01_freetube.apk": "media",
-  "df02_yandexnavi.apk": "navigation",
+  "df02_yandexnavi.apk": "navigation", "df03_antiradar.apk": "antiradar",
+  "df04_backbutton.apk": "back button", "l7_freetube.apk": "media",
+  "l7_systemui.apk": "app menu", "l7_langagent.apk": "remote control",
 };
+const appLabel = (file) =>
+  APP_LABEL[file] || (file.startsWith("l7ru_") ? "Russian language pack" : "app");
+// The server may name the phase outright (newer recipes do); otherwise infer it.
 const phaseOf = (op) =>
-  op.op === "install" ? "apps"
+  op.phase && PHASE_META[op.phase] ? op.phase
+  : op.op === "install" ? "apps"
   : op.op === "sqlite" || op.op === "settings" ? "menu"
   : op.op === "shell" ? (/pm grant/.test(op.cmd) ? "apps" : /force-stop/.test(op.cmd) ? "menu" : "prepare")
   : "prepare";
@@ -769,13 +791,22 @@ async function execOp(op, i) {
       if (uid !== "0") throw new Error("The head unit would not allow setup.");
       tele("prepare · unlock · ok", "ok"); return;
     }
+    case "require": {
+      // a precondition on the car itself; failing it installs nothing
+      const v = await adb.getprop(op.prop);
+      if (!v.includes(op.contains)) {
+        tele(`prepare · ${op.prop} · ${v.slice(0, 60)}`, "er");
+        throw new Error(op.message || "This head unit isn't supported.");
+      }
+      tele("prepare · firmware · ok", "ok"); return;
+    }
     case "setprop": {
       if (!(await adb.setprop(op.key, op.value)))
         throw new Error("The head unit rejected a required setting.");
       tele("prepare · configure · ok", "ok"); return;
     }
     case "install": {
-      const label = APP_LABEL[op.file] || "app";
+      const label = appLabel(op.file);
       const bytes = await download(op, i, label);
       tele(`install · ${label} · sha ${op.sha256.slice(0, 8)}`, "dim");
       if (!(await sha256ok(bytes, op.sha256))) {

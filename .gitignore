@@ -1,5 +1,6 @@
 # --- payload binaries: hosted in the cloud, never committed -------------------
 payload/*.apk
+payload/**/*.apk
 
 # --- secrets: signing keys / filled env files must NEVER be committed ---------
 keygen/license_private.key

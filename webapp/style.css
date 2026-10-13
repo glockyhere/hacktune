@@ -195,21 +195,22 @@ body {
 
 .picker-track {
   position: relative;
-  display: grid; grid-template-columns: 1fr 1fr;
+  display: grid; grid-template-columns: repeat(3, 1fr);
   border: 1px solid var(--edge);
   background: var(--ground);
   isolation: isolate;
 }
-/* the moving part: one element that slides between the two seats */
+/* the moving part: one element that slides between the seats */
 .picker-ind {
   position: absolute; z-index: 0;
-  top: 0; bottom: 0; left: 0; width: 50%;
+  top: 0; bottom: 0; left: 0; width: calc(100% / 3);
   background: oklch(0.845 0.145 82 / 0.07);
   border-bottom: 2px solid var(--lume);
   transform: translateX(0);
   transition: transform 520ms var(--ease);
 }
 .picker-track[data-sel="1"] .picker-ind { transform: translateX(100%); }
+.picker-track[data-sel="2"] .picker-ind { transform: translateX(200%); }
 @media (prefers-reduced-motion: reduce) { .picker-ind { transition: none; } }
 
 .picker-opt {
