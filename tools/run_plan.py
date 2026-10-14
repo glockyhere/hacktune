@@ -61,15 +61,18 @@ def main() -> int:
             sh(f"setprop {op['key']} {op['value']}")
             if sh(f"getprop {op['key']}").strip() != op["value"]:
                 sys.exit(f"{tag}: setprop rejected")
-        elif k == "install":
+        elif k in ("install", "push"):
             data = urllib.request.urlopen(a.api + op["url"], timeout=300).read()
             if hashlib.sha256(data).hexdigest() != op["sha256"]:
                 sys.exit(f"{tag}: checksum mismatch for {op['file']}")
             with tempfile.NamedTemporaryFile(suffix=".apk", delete=False) as f:
                 f.write(data)
-            remote = f"/data/local/tmp/carapk_plan_{i}.apk"
+            remote = op["to"] if k == "push" else f"/data/local/tmp/carapk_plan_{i}.apk"
             adb(a.serial, "push", f.name, remote)
             os.unlink(f.name)
+            if k == "push":
+                print(tag, op["file"], "copied")
+                continue
             out = sh(f"pm install {' '.join(op.get('flags') or [])} {remote}")
             sh(f"rm -f {remote}")
             if "Success" not in out:
@@ -82,6 +85,8 @@ def main() -> int:
                    else op["cmd"])
             out = sh(cmd)
             if any(b in out for b in BAD):
+                if op.get("must"):
+                    sys.exit(f"{tag}: {op.get('message', 'required step failed')} ({out.strip()[:200]})")
                 print(tag, "WARN", out.strip().splitlines()[0][:100])
                 continue
         else:

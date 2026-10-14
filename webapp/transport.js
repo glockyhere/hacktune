@@ -112,6 +112,16 @@ class AdbBackend {
   // onPush(sent, total) reports the USB/relay push as it goes.
   async install(bytes, flags, onPush) {
     const remote = `/data/local/tmp/carapk_${Date.now()}.apk`;
+    await this.push(bytes, remote, onPush);
+    const flagStr = (flags || []).join(" ");
+    const out = (await this.shell(`pm install ${flagStr} ${remote}`)).stdout;
+    await this.shell(`rm -f ${remote}`);
+    return { ok: /Success/.test(out), output: out.trim() };
+  }
+
+  // Copy a file onto the unit (no install). Used to lay out several APKs that a
+  // later shell step installs together, e.g. one multi-package staged session.
+  async push(bytes, remote, onPush) {
     await this.run(async () => {
       const sync = await this.adb.sync();
       try {
@@ -124,10 +134,6 @@ class AdbBackend {
         try { await sync.dispose(); } catch { /* link already gone */ }
       }
     });
-    const flagStr = (flags || []).join(" ");
-    const out = (await this.shell(`pm install ${flagStr} ${remote}`)).stdout;
-    await this.shell(`rm -f ${remote}`);
-    return { ok: /Success/.test(out), output: out.trim() };
   }
 
   async close() { try { await this.adb.close(); } catch { /* already gone */ } }

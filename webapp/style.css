@@ -195,7 +195,7 @@ body {
 
 .picker-track {
   position: relative;
-  --n: 4;                                   /* seats; JS sets --i to the chosen one */
+  --n: 3;                                   /* seats; JS sets --i to the chosen one */
   display: grid; grid-template-columns: repeat(var(--n), minmax(0, 1fr));
   border: 1px solid var(--edge);
   background: var(--ground);

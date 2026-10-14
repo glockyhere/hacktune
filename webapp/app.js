@@ -19,6 +19,17 @@ const $ = (id) => document.getElementById(id);
 const API = CFG.API.replace(/\/$/, "");
 const stage = $("stage");
 
+// Test deployments (config TEST: true) say so on every screen.
+if (CFG.TEST) {
+  document.title = "TEST · " + document.title;
+  const b = document.createElement("div");
+  b.textContent = "TEST BUILD — not the production installer";
+  b.style.cssText = "position:fixed;top:0;left:0;right:0;z-index:9999;padding:4px 16px;"
+    + "background:#b3261e;color:#fff;font:600 12px/1.4 system-ui,sans-serif;text-align:center;"
+    + "letter-spacing:.04em";
+  document.body.appendChild(b);
+}
+
 const state = { rid: null, token: null, profile: null, plan: null, adb: null,
                 resumeFrom: 0, device: "", ops: 0 };
 
@@ -155,7 +166,8 @@ document.querySelectorAll(".card[data-card]").forEach((card) => {
 // Telling the user that here is why the selector exists instead of two text
 // fields. `howto` is shown once approved, before they hunt for the right port.
 const L7_HOWTO = "Turn on ADB: Settings → System → information page → tap \u201cMCU version\u201d "
-  + "5 times quickly → password HelloFengshen2023 → switch ADB on. Then connect the head "
+  + "5 times quickly → password HelloFengshen2023 (if Axolotl is already installed, use the "
+  + "password we sent you) → switch ADB on. Then connect the head "
   + "unit with a USB cable and press Connect. When the install finishes, the head unit "
   + "restarts by itself.";
 const CARS = {
@@ -165,16 +177,15 @@ const CARS = {
   faw_b70:       { brand: "FAW", model: "B70", make: "FAW",
                    os: "9", link: "Wireless ADB", via: "relay",
                    apps: ["back button", "media", "Wi-Fi tile", "navigation", "home screen"] },
-  // The L7 is sold as two separate packages; `model` goes into the activation
-  // request and the server only hands each approved token its own package.
-  // ADB is hidden behind the engineering menu and switches itself off on every
-  // restart, so the buyer must turn it on right before connecting.
-  dongfeng_l7_ru:   { brand: "Aeolus L7", model: "L7 RU", make: "Dongfeng",
-                      os: "10", link: "USB cable", via: "usb", howto: L7_HOWTO,
-                      summary: "Russian UI", apps: ["Russian interface", "remote language control"] },
-  dongfeng_l7_apps: { brand: "Aeolus L7", model: "L7 Apps", make: "Dongfeng",
-                      os: "10", link: "USB cable", via: "usb", howto: L7_HOWTO,
-                      apps: ["navigation", "antiradar", "media", "app tiles"] },
+  // One L7 package: Russian UI, a launcher tile for every app the owner installs
+  // later, and the engineering menu behind a per-car password. ADB is hidden
+  // behind that menu and switches itself off on every restart, so the buyer
+  // must turn it on right before connecting.
+  dongfeng_l7: { brand: "Aeolus L7", model: "L7", make: "Dongfeng",
+                 os: "10", link: "USB cable", via: "usb", howto: L7_HOWTO,
+                 summary: "Russian UI + launcher",
+                 apps: ["Russian interface", "launcher for any app", "locked engineering menu",
+                        "remote language control"] },
 };
 const CAR_IDS = Object.keys(CARS);
 const track = $("picker-track");
@@ -674,7 +685,7 @@ function pickProfile(model, dev) {
   // The L7's Qualcomm build never renamed its product: "trinket for arm64".
   // Hardware can't tell which package was bought, so keep the selected one.
   if (m.includes("trinket")) {
-    const id = String(state.car).startsWith("dongfeng_l7") ? state.car : "dongfeng_l7_ru";
+    const id = CARS[state.car] && String(state.car).startsWith("dongfeng_l7") ? state.car : "dongfeng_l7";
     return { id, name: `Dongfeng Aeolus ${CARS[id].model}` };
   }
   if (m.includes("dongfeng") || m.includes("aeolus") || m.includes("spm8675"))
@@ -688,6 +699,7 @@ const friendly = (id, model) =>
 // --- phases ----------------------------------------------------------------
 const PHASE_META = { prepare: "Preparing the head unit", apps: "Installing apps", menu: "Setting up the menu",
                      language: "Installing the Russian interface", remote: "Enabling remote language control",
+                     system: "Installing the launcher and engineering lock",
                      restart: "Restarting the head unit" };
 const APP_LABEL = {
   "01_backbutton.apk": "back button", "02_freetube.apk": "media",
@@ -695,14 +707,15 @@ const APP_LABEL = {
   "05_launcher.apk": "home screen", "df01_freetube.apk": "media",
   "df02_yandexnavi.apk": "navigation", "df03_antiradar.apk": "antiradar",
   "df04_backbutton.apk": "back button", "l7_freetube.apk": "media",
-  "l7_systemui.apk": "app menu", "l7_langagent.apk": "remote control",
+  "l7_systemui.apk": "launcher", "l7_langagent.apk": "remote control",
+  "l7_settings.apk": "engineering lock",
 };
 const appLabel = (file) =>
   APP_LABEL[file] || (file.startsWith("l7ru_") ? "Russian language pack" : "app");
 // The server may name the phase outright (newer recipes do); otherwise infer it.
 const phaseOf = (op) =>
   op.phase && PHASE_META[op.phase] ? op.phase
-  : op.op === "install" ? "apps"
+  : op.op === "install" || op.op === "push" ? "apps"
   : op.op === "sqlite" || op.op === "settings" ? "menu"
   : op.op === "shell" ? (/pm grant/.test(op.cmd) ? "apps" : /force-stop/.test(op.cmd) ? "menu" : "prepare")
   : "prepare";
@@ -736,7 +749,8 @@ let saidPct = -1;
 const W_OP = 400_000;                       // any non-install step
 const W_PM = 3_000_000;                     // Android's own install, per APK
 function weigh(plan) {
-  state.w = plan.ops.map((op) => op.op === "install" ? 2 * (op.size || 2_000_000) + W_PM : W_OP);
+  state.w = plan.ops.map((op) => op.op === "install" ? 2 * (op.size || 2_000_000) + W_PM
+                              : op.op === "push" ? 2 * (op.size || 2_000_000) : W_OP);
   state.cum = [0];
   for (const x of state.w) state.cum.push(state.cum[state.cum.length - 1] + x);
   state.lastF = 0;
@@ -751,7 +765,7 @@ function opProgress(i, frac) {
 }
 // An install op's share for its download, push and Android-install phases.
 function installShares(op) {
-  const size = op.size || 2_000_000, all = 2 * size + W_PM;
+  const size = op.size || 2_000_000, all = 2 * size + (op.op === "push" ? 0 : W_PM);
   return { dl: size / all, push: size / all };
 }
 function progress(f) {
@@ -900,6 +914,16 @@ async function execOp(op, i) {
       if (!res.ok) throw new Error(`Could not install the ${label}.`);
       tele(`install · ${label} · installed`, "ok"); return;
     }
+    case "push": {
+      const label = appLabel(op.file);
+      tele(`copy · ${label} · sha ${op.sha256.slice(0, 8)}`, "dim");
+      const bytes = await payload(op, i, label);
+      prefetchAfter(i);
+      const sh = installShares(op);
+      opProgress(i, sh.dl);
+      await adb.push(bytes, op.to, (sent, total) => opProgress(i, sh.dl + sh.push * (sent / total)));
+      tele(`copy · ${label} · ok`, "ok"); return;
+    }
     case "sqlite":
     case "settings":
     case "shell": {
@@ -912,6 +936,11 @@ async function execOp(op, i) {
       // "ok" regardless. These steps are best-effort — a missing grant should
       // not abandon a paid install — but it must be VISIBLE, not invented.
       const bad = /Exception|Failure|error:|Error:|Denied/i.test(out);
+      // `must` steps (e.g. the staged system update) stop the install instead
+      if (bad && op.must) {
+        tele(`configure · ${out.split("\n")[0].slice(0, 70)}`, "er");
+        throw new Error(op.message || "The head unit refused a required step.");
+      }
       if (bad) {
         tele(`configure · ${out.split("\n")[0].slice(0, 70)}`, "er");
         $("tele").open = true;
@@ -954,7 +983,7 @@ function prefetchAfter(i) {
   let ahead = 0;
   for (let j = i + 1; j < ops.length && ahead < PREFETCH_AHEAD; j++) {
     const op = ops[j];
-    if (op.op !== "install") continue;
+    if (op.op !== "install" && op.op !== "push") continue;
     ahead++;
     if (prefetched.has(op.file)) continue;
     const p = cacheGet(op.sha256).then((hit) => hit || download(op, j, null));

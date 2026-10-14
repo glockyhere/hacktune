@@ -76,7 +76,9 @@ app.add_middleware(
 
 @app.on_event("startup")
 async def _startup():
-    if bot:
+    # TG_POLL=0: a second instance (the test API) still notifies, but leaves
+    # the button presses to the production instance on the same database
+    if bot and os.environ.get("TG_POLL", "1") != "0":
         asyncio.create_task(bot.poll_loop())
 
 
@@ -171,7 +173,7 @@ async def api_plan(req: Request):
     if PAYLOAD_ORIGIN.startswith("file://"):
         root = PAYLOAD_ORIGIN[len("file://"):]
         for op in out["ops"]:
-            if op["op"] == "install":
+            if op["op"] in ("install", "push"):
                 try:
                     op["size"] = os.path.getsize(os.path.join(root, op["file"]))
                 except OSError:

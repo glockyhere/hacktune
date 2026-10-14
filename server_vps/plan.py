@@ -79,6 +79,11 @@ def _install(file: str, flags: list[str]) -> dict:
     return {"op": "install", "file": file, "sha256": PAYLOAD[file], "flags": flags}
 
 
+def _push(file: str, to: str) -> dict:
+    """Copy a verified payload file onto the unit without installing it."""
+    return {"op": "push", "file": file, "sha256": PAYLOAD[file], "to": to}
+
+
 def _faw_ops() -> list[dict]:
     F = ["-r", "-d"]
     return [
@@ -217,18 +222,24 @@ def _l7_finish(ctx: dict | None) -> list[dict]:
     ]
 
 
-def _l7_ru_ops(ctx: dict | None = None) -> list[dict]:
+def _l7_ru_core() -> list[dict]:
     """Russian interface: overlays live in /data, the system partitions are untouched."""
     overlays = sorted(f for f in _L7_PAYLOAD if f.startswith("l7ru_"))
     L = "language"
     return [
-        *_L7_GATE,
         *[_install(f, ["-r"]) | {"phase": L} for f in overlays],
         {"op": "shell", "phase": L,
          "cmd": "for p in $(cmd overlay list | grep -o 'uz\\.l7ru\\.overlay\\.[A-Za-z0-9_.]*'); "
                 "do cmd overlay enable --user 0 $p; done"},
         {"op": "setprop", "phase": L, "key": "persist.sys.locale", "value": "ru-RU"},
         {"op": "settings", "phase": L, "ns": "system", "key": "system_locales", "value": "ru-RU"},
+    ]
+
+
+def _l7_ru_ops(ctx: dict | None = None) -> list[dict]:
+    return [
+        *_L7_GATE,
+        *_l7_ru_core(),
         *(_l7_lock_ops() if _L7_LOCK else []),
         *_l7_finish(ctx),
     ]
@@ -277,6 +288,46 @@ def _l7_apps_ops(ctx: dict | None = None) -> list[dict]:
 
 
 # l7_settings.apk is pinned either way; L7_LOCK decides whether a plan uses it
+# Android 10 keeps ONE pending staged session, so SystemUI (launcher tiles) and
+# SystemSettings (engineering lock) go up as a single multi-package session.
+# The files are pushed first (verified on the way), then pm builds the session.
+_L7_TMP = "/data/local/tmp"
+_L7_SYSTEM = ["l7_systemui.apk", "l7_settings.apk"]
+_STALE_STAGED = ("for id in $(pm get-stagedsessions | grep 'isStagedSessionReady = true' "
+                 "| grep 'isStagedSessionApplied = false' | grep 'isStagedSessionFailed = false' "
+                 "| sed -n 's/.*sessionId = \\([0-9]*\\);.*/\\1/p'); do pm install-abandon $id; done")
+
+
+def _l7_system_ops() -> list[dict]:
+    S = "system"
+    sid = "sed -n 's/.*\\[\\([0-9]*\\)\\].*/\\1/p'"
+    files = " ".join(_L7_SYSTEM)
+    stage = (
+        f"{_STALE_STAGED}; "
+        f"P=$(pm install-create --multi-package --staged --enable-rollback | {sid}); "
+        "[ -n \"$P\" ] || { echo 'Error: no staged session'; exit 0; }; "
+        f"for f in {files}; do "
+        f"C=$(pm install-create --staged --enable-rollback | {sid}); "
+        f"pm install-write -S $(stat -c %s {_L7_TMP}/$f) $C $f {_L7_TMP}/$f >/dev/null && "
+        "pm install-add-session $P $C; "
+        "done; "
+        f"out=$(pm install-commit $P 2>&1); cd {_L7_TMP} && rm -f {files}; "
+        "case \"$out\" in *Success*) echo staged;; *) echo \"Error: $out\";; esac"
+    )
+    return [
+        *[_push(f, f"{_L7_TMP}/{f}") | {"phase": S} for f in _L7_SYSTEM],
+        {"op": "shell", "phase": S, "cmd": stage, "must": True,
+         "message": "The head unit refused the launcher update. Restart it, turn ADB on "
+                    "again and run the install once more."},
+    ]
+
+
+def _l7_ops(ctx: dict | None = None) -> list[dict]:
+    """The one L7 package: Russian UI, a launcher tile for every installed app,
+    and the engineering menu behind a per-car password (L8/lock/passwd.py)."""
+    return [*_L7_GATE, *_l7_ru_core(), *_l7_system_ops(), *_l7_finish(ctx)]
+
+
 _L7_RU_FILES = {f for f in _L7_PAYLOAD if f.startswith("l7ru_")} | {"l7_langagent.apk", "l7_settings.apk"}
 _L7_APPS_FILES = {"l7_freetube.apk", "l7_systemui.apk", "l7_langagent.apk"}
 
@@ -292,6 +343,12 @@ RECIPES = {
                          "model": "L7 RU",
                          "done": "The head unit restarts by itself in about 20 seconds and "
                                  "comes back in Russian."},
+    "dongfeng_l7":      {"name": "Dongfeng Aeolus L7", "connection": "usb",
+                         "build": _l7_ops, "ctx": True, "web_only": True,
+                         "files": _L7_RU_FILES | set(_L7_SYSTEM),
+                         "model": "L7",
+                         "done": "The head unit restarts by itself in about 20 seconds and comes back "
+                                 "in Russian. Apps you install later get their own tile under All apps."},
     "dongfeng_l7_apps": {"name": "Dongfeng Aeolus L7 · Apps", "connection": "usb",
                          "build": _l7_apps_ops, "ctx": True, "web_only": True, "files": _L7_APPS_FILES,
                          "model": "L7 Apps",
@@ -346,7 +403,7 @@ def build_plan(profile_id: str, rid: str, hmac_key: bytes, ttl: int = 900,
         raise KeyError(f"unknown profile {profile_id!r}")
     ops = rec["build"](ctx) if rec.get("ctx") else rec["build"]()
     for op in ops:
-        if op["op"] == "install":
+        if op["op"] in ("install", "push"):
             op["url"] = sign_url(op["file"], rid, hmac_key, ttl, now)
     return {
         "profile": profile_id,
