@@ -139,6 +139,10 @@ build.bat            :: -> dist\CarApkInstaller.exe  (+ dist\tools\)
   launcher DB layout, or payload URLs in `webapp/`. Those come from `/api/plan`
   per approved session. The whole security argument is "the client holds nothing
   worth stealing" — see `docs/WEBAPP.md`. Obscurity is NOT the protection.
+- **Payload `.gz` twins:** `/var/lib/carapk/payload/<file>.apk.gz` (gzip -6) is
+  what browsers actually receive for most files. When you replace an APK,
+  delete/regenerate its `.gz` too, or every install gets the old bytes and
+  fails the SHA-256 check. Files that shrink <8% have no `.gz` (served as-is).
 - **Payload must be gated.** The web `/dl` flow assumes a PRIVATE origin
   (`PAYLOAD_ORIGIN`); the old public `pub-*.r2.dev` bucket lets anyone download
   the APKs free. Make the bucket private before selling.
