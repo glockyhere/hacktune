@@ -586,6 +586,7 @@ async function connect() {
   // so on the dead link we are reconnecting from it can hang forever — freezing
   // the one action that recovers from a freeze.
   state.adb?.close().catch(() => { /* stale link, nothing to close */ });
+  const prevAdb = state.adb;                // a dead USB link is released + reused below
   state.adb = null;
   try {
     let t;
@@ -601,7 +602,7 @@ async function connect() {
         throw new Error("This browser has no WebUSB. Use Chrome or Edge on a computer.");
       }
       tele("linking over usb", "dim");
-      adb = await t.connectUsb();
+      adb = await t.connectUsb({ previous: prevAdb?.usb ? prevAdb : null });
       link = "USB";
     } else {
       tele("linking over the local relay", "dim");
@@ -739,6 +740,7 @@ async function runInstall() {
   setPhase("install");
   status("run-status", "Keep the head unit connected.");
   const ops = state.plan.ops;
+  let relinks = 0;                          // consecutive automatic USB relinks
 
   for (let i = state.resumeFrom; i < ops.length; i++) {
     const key = phaseOf(ops[i]);
@@ -746,7 +748,20 @@ async function runInstall() {
     progress(i / ops.length);
     try {
       await execOp(ops[i], i);
+      relinks = 0;
     } catch (e) {
+      // A USB link that dropped mid-step (WebUSB "transfer error", or the unit
+      // re-enumerating) is reconnected silently and the SAME step retried —
+      // every op is idempotent. The buyer only has to act if it keeps failing.
+      if (state.adb?.dead && state.adb.via === "usb" && relinks < 3) {
+        relinks++;
+        tele(`link lost · ${e.message} · reconnecting (${relinks}/3)`, "er");
+        status("run-status", "The USB connection dropped. Reconnecting…");
+        if (await relinkUsb()) {
+          status("run-status", "Keep the head unit connected.");
+          i--; continue;                    // same op again
+        }
+      }
       state.resumeFrom = i;                 // resume HERE, not from zero
       mark(key, "failed", "FAILED");
       $("halt-n").textContent = String(i + 1).padStart(2, "0");
@@ -783,6 +798,22 @@ async function runInstall() {
     });
   } catch { /* best effort */ }
   try { await state.adb?.close(); } catch { /* ignore */ }
+}
+
+// Reattach to the same USB head unit without the chooser (see connectUsb).
+async function relinkUsb() {
+  const old = state.adb;
+  state.adb = null;
+  try {
+    const t = await transport();
+    state.adb = await t.connectUsb({ previous: old, waitMs: 30_000 });
+    tele("relinked over usb", "ok");
+    return true;
+  } catch (e) {
+    tele("relink failed · " + e.message, "er");
+    state.adb = old;                        // still dead: the halt path below handles it
+    return false;
+  }
 }
 
 function buildRecap() {

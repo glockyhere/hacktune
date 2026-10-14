@@ -66,19 +66,26 @@ function makeLink() {
 
 // One ADB device, wrapped so the executor never touches ya-webadb directly.
 class AdbBackend {
-  // `link` is null for USB, where the browser itself surfaces a yanked cable.
-  constructor(adb, link) { this.adb = adb; this.link = link || null; }
+  constructor(adb, link, usb) {
+    this.adb = adb; this.link = link || null;
+    this.usb = usb || null;          // { serial, raw } for USB, so it can be relinked
+  }
 
   get dead() { return !!this.link?.dead; }
+  get via() { return this.usb ? "usb" : "relay"; }
 
   // Every call races the operation against the link dying, so a vanished car
   // produces a message the buyer can act on instead of an endless spinner.
+  // Any error out of ya-webadb means the transport broke (a failed command
+  // still returns normally with its output), so it marks the link dead: on USB
+  // a WebUSB "transfer error" leaves the connection unusable, and reusing it
+  // would only fail again on the same step.
   async run(fn) {
     if (this.link?.dead) throw new Error(this.link.reason);
-    if (!this.link) return fn();
     let release;
     const died = new Promise((_, reject) => { release = this.link.watch(reject); });
     try { return await Promise.race([fn(), died]); }
+    catch (e) { this.link.kill(e?.message || String(e)); throw e; }
     finally { release(); }
   }
 
@@ -126,16 +133,55 @@ class AdbBackend {
 }
 
 // --- USB (Dongfeng MAGE) ---------------------------------------------------
-export async function connectUsb() {
+// Without `previous`: shows the browser's device chooser (needs a click).
+// With `previous` (a dead USB backend): RELINKS to the same head unit without a
+// chooser or a click, via the devices this page was already granted. Some head
+// units (the Aeolus L7) drop their USB link now and then mid-install; the unit
+// re-enumerates within seconds, so wait for it to come back rather than fail.
+// `waitMs`: how long to wait for that unit to reappear. The automatic retry
+// waits up to 30 s; a Connect click checks once and otherwise falls back to the
+// chooser, which must open while the click's user activation is still fresh.
+export async function connectUsb({ previous, waitMs = 0 } = {}) {
   const mgr = AdbDaemonWebUsbDeviceManager.BROWSER;
   if (!mgr) throw new Error("This browser has no WebUSB. Use Chrome or Edge on desktop.");
-  const device = await mgr.requestDevice();          // shows the chooser
-  if (!device) throw new Error("No device selected.");
+  let device;
+  if (previous?.usb) {
+    // release the broken handle first, or the interface stays claimed by it
+    await Promise.race([previous.usb.raw.close().catch(() => {}), sleep(1500)]);
+    device = await waitForGranted(mgr, previous.usb.serial, waitMs);
+  }
+  if (!device && waitMs) {
+    throw new Error("The head unit did not come back on USB. Check the cable and press Connect.");
+  }
+  if (!device) {
+    device = await mgr.requestDevice();               // shows the chooser
+    if (!device) throw new Error("No device selected.");
+  }
   const connection = await device.connect();
   const transport = await AdbDaemonTransport.authenticate({
     serial: device.serial, connection, credentialStore: CRED,
   });
-  return new AdbBackend(new Adb(transport));
+  const link = makeLink();
+  const raw = device.raw;
+  const onGone = (e) => {
+    if (e.device !== raw) return;
+    navigator.usb.removeEventListener("disconnect", onGone);
+    link.kill("The USB connection to the head unit dropped.");
+  };
+  navigator.usb.addEventListener("disconnect", onGone);
+  return new AdbBackend(new Adb(transport), link, { serial: device.serial, raw });
+}
+
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+// The same unit among devices this page was already granted, or null.
+async function waitForGranted(mgr, serial, timeoutMs) {
+  const until = Date.now() + timeoutMs;
+  for (;;) {
+    const found = (await mgr.getDevices()).find((d) => d.serial === serial);
+    if (found || Date.now() >= until) return found || null;
+    await sleep(1000);
+  }
 }
 
 // --- Wireless via the local relay (FAW B70) --------------------------------
