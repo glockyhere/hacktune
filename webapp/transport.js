@@ -109,14 +109,15 @@ class AdbBackend {
 
   // Push an APK to a temp path and install it. `bytes` is an ArrayBuffer or
   // Uint8Array already verified against its pinned SHA-256 by the caller.
-  async install(bytes, flags) {
+  // onPush(sent, total) reports the USB/relay push as it goes.
+  async install(bytes, flags, onPush) {
     const remote = `/data/local/tmp/carapk_${Date.now()}.apk`;
     await this.run(async () => {
       const sync = await this.adb.sync();
       try {
         await sync.write({
           filename: remote,
-          file: singleChunkStream(new Uint8Array(bytes)),
+          file: chunkedStream(new Uint8Array(bytes), onPush),
           permission: 0o644,
         });
       } finally {
@@ -327,8 +328,19 @@ export async function webSocketConnection(url) {
 }
 
 // --- helpers ---------------------------------------------------------------
-function singleChunkStream(u8) {
+// The APK as 256 KB pieces handed over only when the sync writer asks for them
+// (highWaterMark 0), so `sent` tracks what has actually gone down the wire,
+// give or take one piece.
+const PUSH_PIECE = 256 * 1024;
+function chunkedStream(u8, onPush) {
+  let off = 0;
   return new ReadableStream({
-    start(c) { c.enqueue(u8); c.close(); },
-  });
+    pull(c) {
+      if (off >= u8.length) { c.close(); return; }
+      const end = Math.min(off + PUSH_PIECE, u8.length);
+      c.enqueue(u8.slice(off, end));       // a copy: never hand out views of the whole APK
+      off = end;
+      onPush?.(off, u8.length);
+    },
+  }, { highWaterMark: 0 });
 }

@@ -637,11 +637,12 @@ async function connect() {
     state.resumeFrom = prev.profile === state.profile.id
       && prev.len === state.plan.ops.length ? prev.at : 0;
     buildPhases(state.plan);
+    weigh(state.plan);
     if (state.resumeFrom > 0) {
       state.phases.forEach((p) => {
         if (p.ops[p.ops.length - 1] < state.resumeFrom) mark(p.key, "done", "DONE");
       });
-      progress(state.resumeFrom / state.plan.ops.length);
+      opProgress(state.resumeFrom, 0);
       tele(`resuming at operation ${state.resumeFrom + 1}`, "dim");
       $("btn-install").lastChild.textContent = " Resume from this step";
     }
@@ -728,6 +729,31 @@ const mark = (k, s, l) => { const li = $(`ph-${k}`); if (li) { li.dataset.state 
 
 // throttle the live region: milestones only, never per chunk
 let saidPct = -1;
+
+// Weighted progress. Ops are wildly unequal — one Navi install (download,
+// 106 MB over USB, Android's install) vs a one-line permission grant — so the
+// bar is driven by estimated work, not op count. Units ≈ bytes moved.
+const W_OP = 400_000;                       // any non-install step
+const W_PM = 3_000_000;                     // Android's own install, per APK
+function weigh(plan) {
+  state.w = plan.ops.map((op) => op.op === "install" ? 2 * (op.size || 2_000_000) + W_PM : W_OP);
+  state.cum = [0];
+  for (const x of state.w) state.cum.push(state.cum[state.cum.length - 1] + x);
+  state.lastF = 0;
+}
+// Progress inside op i, frac 0..1. Never moves backwards within a run.
+function opProgress(i, frac) {
+  const total = state.cum?.[state.cum.length - 1];
+  const f = total ? (state.cum[i] + state.w[i] * Math.min(1, Math.max(0, frac))) / total
+                  : i / state.plan.ops.length;
+  state.lastF = Math.max(state.lastF || 0, f);
+  progress(state.lastF);
+}
+// An install op's share for its download, push and Android-install phases.
+function installShares(op) {
+  const size = op.size || 2_000_000, all = 2 * size + W_PM;
+  return { dl: size / all, push: size / all };
+}
 function progress(f) {
   scale(f);
   const p = Math.round(f * 100);
@@ -749,7 +775,8 @@ async function runInstall() {
   for (let i = state.resumeFrom; i < ops.length; i++) {
     const key = phaseOf(ops[i]);
     if (i === state.resumeFrom || phaseOf(ops[i - 1]) !== key) mark(key, "active", "WORKING");
-    progress(i / ops.length);
+    state.curOp = i;
+    opProgress(i, 0);
     try {
       await execOp(ops[i], i);
       relinks = 0;
@@ -856,7 +883,20 @@ async function execOp(op, i) {
       tele(`install · ${label} · sha ${op.sha256.slice(0, 8)}`, "dim");
       const bytes = await payload(op, i, label);       // cached / prefetched / fetched, verified
       prefetchAfter(i);                                // next files download during the push
-      const res = await adb.install(bytes, op.flags);
+      const sh = installShares(op);
+      opProgress(i, sh.dl);
+      // after the push, Android's install shows as a slow creep toward its share
+      let creep = null;
+      const res = await adb.install(bytes, op.flags, (sent, total) => {
+        opProgress(i, sh.dl + sh.push * (sent / total));
+        if (sent >= total && !creep) {
+          const t0 = Date.now(), est = 1500 + (op.size || 0) / 15_000;   // ms
+          creep = setInterval(() => {
+            const c = 0.95 * (1 - Math.exp(-(Date.now() - t0) / est));
+            opProgress(i, sh.dl + sh.push + (1 - sh.dl - sh.push) * c);
+          }, 200);
+        }
+      }).finally(() => clearInterval(creep));
       if (!res.ok) throw new Error(`Could not install the ${label}.`);
       tele(`install · ${label} · installed`, "ok"); return;
     }
@@ -951,12 +991,11 @@ async function download(op, i, label) {
   const total = Number(r.headers.get("X-Decoded-Length") || r.headers.get("Content-Length")) || 0;
   const reader = r.body.getReader();
   const chunks = []; let got = 0;
-  const base = i / state.plan.ops.length, span = 1 / state.plan.ops.length;
   for (;;) {
     const { done, value } = await reader.read();
     if (done) break;
     chunks.push(value); got += value.length;
-    if (label && total) progress(base + span * Math.min(1, got / total));
+    if (total && state.curOp === i) opProgress(i, installShares(op).dl * (got / total));
   }
   const out = new Uint8Array(got); let off = 0;
   for (const c of chunks) { out.set(c, off); off += c.length; }

@@ -165,7 +165,18 @@ async def api_plan(req: Request):
         name = " ".join(x for x in (payload.get("make"), "L7", vin) if x)
         serial = str(b.get("serial", ""))           # read off the unit by the client
         ctx = {"fleet": await asyncio.to_thread(fleet.enrol, payload["rid"], vin, name, serial)}
-    return plan_mod.build_plan(profile, payload["rid"], DOWNLOAD_HMAC_KEY, DOWNLOAD_TTL, ctx=ctx)
+    out = plan_mod.build_plan(profile, payload["rid"], DOWNLOAD_HMAC_KEY, DOWNLOAD_TTL, ctx=ctx)
+    # sizes let the client weight its progress bar by real work, so a 106 MB
+    # Navi install isn't worth the same as a one-line permission grant
+    if PAYLOAD_ORIGIN.startswith("file://"):
+        root = PAYLOAD_ORIGIN[len("file://"):]
+        for op in out["ops"]:
+            if op["op"] == "install":
+                try:
+                    op["size"] = os.path.getsize(os.path.join(root, op["file"]))
+                except OSError:
+                    pass
+    return out
 
 
 @app.post("/api/verify")
