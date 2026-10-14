@@ -614,6 +614,9 @@ async function connect() {
     const model = (await adb.getprop("ro.product.model")) || "Head unit";
     const dev = (await adb.getprop("ro.product.device")) || "";
     const android = (await adb.getprop("ro.build.version.release")) || "?";
+    // the unit's own serial: lets the server recognise the same car across
+    // separate purchases, whatever VIN was typed into each request
+    state.serial = (await adb.getprop("ro.serialno")) || "";
     state.profile = pickProfile(model, dev);
     state.device = `${friendly(state.profile.id, model)} · Android ${android} · ${link}`;
 
@@ -626,7 +629,7 @@ async function connect() {
     // Refetched every link: the signed download URLs inside a plan expire.
     state.plan = await api("/api/plan", {
       method: "POST", headers: { "content-type": "application/json" },
-      body: JSON.stringify({ token: state.token, profile: state.profile.id }),
+      body: JSON.stringify({ token: state.token, profile: state.profile.id, serial: state.serial }),
     });
     // Relinking after a dropped Wi-Fi link must not replay everything. The ops
     // are idempotent, but re-pushing ~100 MB over Wi-Fi is not free, and the

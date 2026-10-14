@@ -5,16 +5,18 @@ plan is issued, so the seller can switch that car's UI language RU/ZH remotely.
   FLEET_URL        base URL of the fleet server (e.g. https://fleet.staldern.com)
   FLEET_ADMIN_KEY  its admin key (X-Admin-Key)
 
-One enrolment per CAR, keyed by VIN: the two L7 packages are separate purchases,
-and a car that buys both, or a buyer who relinks and fetches the plan again, must
-get the SAME token, never a duplicate dashboard row. (No VIN → keyed by the
-activation instead.) If the fleet server is unset or unreachable, enrol() returns
+One enrolment per CAR: the two L7 packages are separate purchases, and a car
+that buys both, or a buyer who relinks and fetches the plan again, must get the
+SAME token, never a duplicate dashboard row. The key is the head unit's own
+serial (ro.serialno, read by the client over USB), because buyers type a
+different VIN into each request; the VIN, then the activation, are fallbacks. If the fleet server is unset or unreachable, enrol() returns
 None and the plan simply leaves the agent out; a paid install must never fail
 because of the seller's dashboard.
 """
 from __future__ import annotations
 import json
 import os
+import re
 import sqlite3
 import urllib.request
 
@@ -37,11 +39,13 @@ class Fleet:
                             (key,)).fetchone()
         return row[0] if row else None
 
-    def enrol(self, rid: str, vin: str, name: str) -> dict | None:
+    def enrol(self, rid: str, vin: str, name: str, serial: str = "") -> dict | None:
         """{"server": FLEET_URL, "token": ...} for this car, or None."""
         if not (FLEET_URL and FLEET_ADMIN_KEY):
             return None
-        key = (vin or "").strip().upper() or f"rid:{rid}"
+        serial = serial.strip()
+        sn = f"sn:{serial}" if re.fullmatch(r"[A-Za-z0-9]{4,32}", serial) else ""
+        key = sn or (vin or "").strip().upper() or f"rid:{rid}"
         token = self._known(key)
         if token:
             return {"server": FLEET_URL, "token": token}

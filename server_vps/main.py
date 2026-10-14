@@ -161,7 +161,8 @@ async def api_plan(req: Request):
     if rec.get("ctx"):
         vin = payload.get("vin", "")
         name = " ".join(x for x in (payload.get("make"), "L7", vin) if x)
-        ctx = {"fleet": await asyncio.to_thread(fleet.enrol, payload["rid"], vin, name)}
+        serial = str(b.get("serial", ""))           # read off the unit by the client
+        ctx = {"fleet": await asyncio.to_thread(fleet.enrol, payload["rid"], vin, name, serial)}
     return plan_mod.build_plan(profile, payload["rid"], DOWNLOAD_HMAC_KEY, DOWNLOAD_TTL, ctx=ctx)
 
 
