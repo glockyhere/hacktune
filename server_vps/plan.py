@@ -26,6 +26,7 @@ import base64
 import hashlib
 import hmac
 import json
+import os
 import time
 from pathlib import Path
 
@@ -152,6 +153,8 @@ PAYLOAD.update(_L7_PAYLOAD)
 # SystemUI-tiles is a patch of this exact build's SystemUI: never run elsewhere.
 _L7_FIRMWARE = "QKQ1.210910.001/75:userdebug"
 _L7_AGENT_DIR = "/data/local/l7agent"
+# Per-car engineering password (L8/re/settings-lock): off until verified on a car.
+_L7_LOCK = os.environ.get("L7_LOCK", "") == "1"
 
 
 def _l7_agent_ops(fleet: dict) -> list[dict]:
@@ -226,7 +229,25 @@ def _l7_ru_ops(ctx: dict | None = None) -> list[dict]:
                 "do cmd overlay enable --user 0 $p; done"},
         {"op": "setprop", "phase": L, "key": "persist.sys.locale", "value": "ru-RU"},
         {"op": "settings", "phase": L, "ns": "system", "key": "system_locales", "value": "ru-RU"},
+        *(_l7_lock_ops() if _L7_LOCK else []),
         *_l7_finish(ctx),
+    ]
+
+
+def _l7_lock_ops() -> list[dict]:
+    """Replace the stock engineering passwords (HelloFengshen2023 / PDSN_xxxxxx)
+    with one derived per car from its PDSN and the seller's salt (L8/lock/passwd.py).
+
+    SystemSettings is persistent, so like the SystemUI tiles it can only be
+    updated by a STAGED install, applied on the restart that ends the plan.
+    Android 10 keeps one pending staged session: drop a stale one first.
+    """
+    return [
+        {"op": "shell", "phase": "lock",
+         "cmd": "for id in $(pm get-stagedsessions | sed -n "
+                "'s/.*sessionId = \\([0-9]*\\); isStaged = true; isStagedSessionReady = true.*/\\1/p'); "
+                "do pm install-abandon $id; done"},
+        _install("l7_settings.apk", ["--staged", "--enable-rollback"]) | {"phase": "lock"},
     ]
 
 
@@ -255,7 +276,8 @@ def _l7_apps_ops(ctx: dict | None = None) -> list[dict]:
     ]
 
 
-_L7_RU_FILES = {f for f in _L7_PAYLOAD if f.startswith("l7ru_")} | {"l7_langagent.apk"}
+# l7_settings.apk is pinned either way; L7_LOCK decides whether a plan uses it
+_L7_RU_FILES = {f for f in _L7_PAYLOAD if f.startswith("l7ru_")} | {"l7_langagent.apk", "l7_settings.apk"}
 _L7_APPS_FILES = {"l7_freetube.apk", "l7_systemui.apk", "l7_langagent.apk"}
 
 RECIPES = {

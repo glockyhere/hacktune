@@ -54,3 +54,30 @@ and `l7_langagent.apk`, stopping an already-running agent first. Dashboard down
 
 `python tools/run_plan.py --token <approved token> --profile dongfeng_l7_ru` (or `dongfeng_l7_apps`)
 runs the plan over adb with the browser's op semantics.
+
+## Engineering password lock (built, not yet enabled)
+
+The stock firmware opens its engineering screens with two well-known passwords:
+`HelloFengshen2023` (System info → MCU version ×5 → ADB switch) and `PDSN_` + the
+last 6 characters of the PDSN (PDSN tile ×5 → vehicle-mode settings). Anyone who
+knows them can turn ADB on and copy the installed software.
+
+`l7_settings.apk` (source: `~/Desktop/L8/re/settings-lock/`) is the stock
+SystemSettings with one hook: `FactoryPwdEditView.checkPasswordIsTrue` compares the
+typed text with `L7Lock.accept()` instead of the stock string. Both prompts then
+accept one per-car password and nothing else:
+
+    password = 10 chars of HMAC-SHA256(salt, "L7ENG:" + PDSN) over A–Z/2–9 (no I L O 0 1)
+
+The PDSN comes from `persist.qinggan.vehicle.pdsn`, the same value the System page
+shows. The salt is `~/.config/axolotl/l7-eng-salt` on the seller's Mac, and the build
+writes it into the APK. To look up a car's password:
+`~/Desktop/L8/lock/passwd.py <PDSN>`, or run it with no argument and the car on adb.
+
+- SystemSettings is persistent, so the update is **staged** (`--staged
+  --enable-rollback`) and applies on the restart that ends the RU package.
+- Web: the RU package stages it only when the API runs with `L7_LOCK=1`. The switch
+  is off until the lock has been verified on a car.
+- `new-car.sh` always stages it, in **one** multi-package session together with the
+  SystemUI tiles (Android 10 allows a single pending staged session).
+- A factory reset removes it along with everything else in /data.
