@@ -744,6 +744,7 @@ async function runInstall() {
   status("run-status", "Keep the head unit connected.");
   const ops = state.plan.ops;
   let relinks = 0;                          // consecutive automatic USB relinks
+  prefetchAfter(state.resumeFrom - 1);      // first files download during the checks
 
   for (let i = state.resumeFrom; i < ops.length; i++) {
     const key = phaseOf(ops[i]);
@@ -852,13 +853,9 @@ async function execOp(op, i) {
     }
     case "install": {
       const label = appLabel(op.file);
-      const bytes = await download(op, i, label);
       tele(`install · ${label} · sha ${op.sha256.slice(0, 8)}`, "dim");
-      if (!(await sha256ok(bytes, op.sha256))) {
-        tele(`install · ${label} · checksum mismatch`, "er");
-        throw new Error(`The ${label} download was corrupted. Nothing was installed.`);
-      }
-      tele(`install · ${label} · verified ✓`, "ok");
+      const bytes = await payload(op, i, label);       // cached / prefetched / fetched, verified
+      prefetchAfter(i);                                // next files download during the push
       const res = await adb.install(bytes, op.flags);
       if (!res.ok) throw new Error(`Could not install the ${label}.`);
       tele(`install · ${label} · installed`, "ok"); return;
@@ -887,10 +884,71 @@ async function execOp(op, i) {
   }
 }
 
+// --- payload: cache, prefetch, download ------------------------------------
+// The buyer's own connection is the bottleneck (a few MB/s, ~150 ms away from
+// the server), so: (1) a file this browser already verified is reused from the
+// Cache API, keyed by its pinned SHA-256 — a technician doing car after car
+// downloads each file once; (2) the next few files download WHILE the current
+// one is pushed over USB. Every byte is still hashed against the pin before it
+// is installed, wherever it came from.
+const PAYLOAD_CACHE = "axolotl-payload-v1";
+const PREFETCH_AHEAD = 3;
+const prefetched = new Map();               // file -> Promise<ArrayBuffer>
+
+async function cacheGet(sha) {
+  try {
+    const r = await (await caches.open(PAYLOAD_CACHE)).match(`/sha256/${sha}`);
+    return r ? await r.arrayBuffer() : null;
+  } catch { return null; }                  // no Cache API / private mode: just download
+}
+async function cachePut(sha, bytes) {
+  try {
+    await (await caches.open(PAYLOAD_CACHE)).put(`/sha256/${sha}`,
+      new Response(bytes, { headers: { "content-type": "application/octet-stream" } }));
+  } catch { /* quota or private mode: fine, it was only a cache */ }
+}
+
+// Start downloading the next few install ops after op i (cache hits cost nothing).
+function prefetchAfter(i) {
+  const ops = state.plan.ops;
+  let ahead = 0;
+  for (let j = i + 1; j < ops.length && ahead < PREFETCH_AHEAD; j++) {
+    const op = ops[j];
+    if (op.op !== "install") continue;
+    ahead++;
+    if (prefetched.has(op.file)) continue;
+    const p = cacheGet(op.sha256).then((hit) => hit || download(op, j, null));
+    p.catch(() => prefetched.delete(op.file));   // a failed prefetch is simply redone
+    prefetched.set(op.file, p);
+  }
+}
+
+// The verified bytes for one install op, from cache, prefetch or the network.
+async function payload(op, i, label) {
+  let bytes = await cacheGet(op.sha256), how = "cached";
+  if (!bytes) {
+    const p = prefetched.get(op.file);
+    how = p ? "prefetched" : "downloaded";
+    try { bytes = await (p || download(op, i, label)); }
+    catch { bytes = await download(op, i, label); how = "downloaded"; }
+  }
+  prefetched.delete(op.file);
+  if (!(await sha256ok(bytes, op.sha256))) {
+    tele(`install · ${label} · checksum mismatch`, "er");
+    throw new Error(`The ${label} download was corrupted. Nothing was installed.`);
+  }
+  if (how !== "cached") cachePut(op.sha256, bytes);
+  tele(`install · ${label} · ${how} · verified ✓`, "ok");
+  return bytes;
+}
+
+// `label` null = background prefetch: no progress bar updates.
 async function download(op, i, label) {
   const r = await fetch(API + op.url);
   if (!r.ok) throw new Error(`Download failed (${r.status}).`);
-  const total = Number(r.headers.get("Content-Length")) || 0;
+  // gzip-served files: Content-Length is the compressed size, the decoded size
+  // (what the reader yields) comes in X-Decoded-Length
+  const total = Number(r.headers.get("X-Decoded-Length") || r.headers.get("Content-Length")) || 0;
   const reader = r.body.getReader();
   const chunks = []; let got = 0;
   const base = i / state.plan.ops.length, span = 1 / state.plan.ops.length;
@@ -898,7 +956,7 @@ async function download(op, i, label) {
     const { done, value } = await reader.read();
     if (done) break;
     chunks.push(value); got += value.length;
-    if (total) progress(base + span * (got / total));
+    if (label && total) progress(base + span * Math.min(1, got / total));
   }
   const out = new Uint8Array(got); let off = 0;
   for (const c of chunks) { out.set(c, off); off += c.length; }
