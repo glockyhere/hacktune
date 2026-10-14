@@ -49,7 +49,10 @@ class Fleet:
             req = urllib.request.Request(
                 f"{FLEET_URL}/api/v1/admin/cars", method="POST",
                 data=json.dumps({"name": name[:80]}).encode(),
-                headers={"X-Admin-Key": FLEET_ADMIN_KEY, "Content-Type": "application/json"})
+                # Cloudflare in front of the fleet answers 403 (error 1010) to
+                # urllib's default "Python-urllib/x" user agent: name ourselves
+                headers={"X-Admin-Key": FLEET_ADMIN_KEY, "Content-Type": "application/json",
+                         "User-Agent": "axolotl-activation/1"})
             with urllib.request.urlopen(req, timeout=10) as r:
                 car = json.load(r)
         except Exception as e:  # dashboard down: install without the agent
