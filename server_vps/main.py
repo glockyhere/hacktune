@@ -15,7 +15,7 @@ import urllib.request
 
 from fastapi import FastAPI, Request, Header, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse, StreamingResponse
+from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 
 import plan as plan_mod
 from fleet import Fleet
@@ -68,6 +68,8 @@ app.add_middleware(
     allow_credentials=False,
     allow_methods=["GET", "POST", "OPTIONS"],
     allow_headers=["*"],
+    # the decoded size of a gzip-served APK, so the client's progress bar works
+    expose_headers=["X-Decoded-Length", "Content-Length"],
     max_age=600,
 )
 
@@ -181,13 +183,32 @@ async def api_consume(req: Request):
 
 
 @app.get("/dl/{file}")
-async def api_download(file: str, rid: str = "", exp: str = "", sig: str = ""):
+async def api_download(req: Request, file: str, rid: str = "", exp: str = "", sig: str = ""):
     """Stream one APK, only for a valid, unexpired signed URL from a plan."""
     if not (DOWNLOAD_HMAC_KEY and PAYLOAD_ORIGIN):
         raise HTTPException(status_code=503, detail="downloads not configured")
     ok, why = plan_mod.verify_url(file, rid, exp, sig, DOWNLOAD_HMAC_KEY)
     if not ok:
         raise HTTPException(status_code=403, detail=why)
+
+    # Local payload (the deployed setup): let the server sendfile() it. A
+    # pre-compressed <file>.gz next to it is served to browsers that accept
+    # gzip; fetch() decodes it, so the client still hashes the original bytes
+    # against the pin. X-Decoded-Length carries the real size for progress.
+    if PAYLOAD_ORIGIN.startswith("file://"):
+        path = os.path.join(PAYLOAD_ORIGIN[len("file://"):], file)
+        if not os.path.isfile(path):
+            raise HTTPException(status_code=404, detail="not on origin")
+        headers = {"Content-Disposition": f'attachment; filename="{file}"',
+                   "X-Decoded-Length": str(os.path.getsize(path)),
+                   "Cache-Control": "private, no-store", "Vary": "Accept-Encoding"}
+        gz = path + ".gz"
+        if "gzip" in req.headers.get("accept-encoding", "") and os.path.isfile(gz):
+            headers["Content-Encoding"] = "gzip"
+            return FileResponse(gz, media_type="application/vnd.android.package-archive",
+                                headers=headers)
+        return FileResponse(path, media_type="application/vnd.android.package-archive",
+                            headers=headers)
 
     # Pull from the PRIVATE origin and stream to the client. The public never
     # sees the origin URL; the browser only ever holds an expiring /dl link.
