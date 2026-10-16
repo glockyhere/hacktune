@@ -159,7 +159,8 @@ async def api_plan(req: Request):
         raise HTTPException(status_code=400, detail="unknown profile")
     rec = plan_mod.RECIPES[profile]
     # separately sold packages: the activation must be for THIS one
-    if rec.get("model") and payload.get("model") != rec["model"]:
+    models = rec.get("models") or ((rec["model"],) if rec.get("model") else ())
+    if models and payload.get("model") not in models:
         raise HTTPException(status_code=403, detail="this activation is for a different package")
     ctx = None
     if rec.get("ctx"):

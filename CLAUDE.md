@@ -25,10 +25,12 @@ Two units are supported. The unit is auto-detected and the matching profile in
   renders a fixed list from a SQLite table, so installed apps stay invisible
   until the installer writes rows into `allApp`. Full details and the traps:
   **`docs/DONGFENG_MAGE.md` — read it before touching that profile.**
-- **Dongfeng Aeolus L7** — Android 10, **web only** (no desktop profile), sold as
-  TWO separate packages: Russian UI (overlays + locale) and Apps (Navi/Antiradar/
-  FreeTube + a staged SystemUI update that adds grid tiles). Both enrol the car in
-  the seller's language fleet and reboot. **`docs/DONGFENG_L7.md`.**
+- **Dongfeng Aeolus L7** — Android 10, **web only** (no desktop profile), ONE
+  package: Russian UI (overlays + locale), a patched launcher (a grid tile for
+  every app the owner installs) and the engineering menu locked behind a per-car
+  password, staged together as one multi-package session; then the language
+  fleet agent and a reboot. We install no apps: the seller sells the ADB
+  password instead. **`docs/DONGFENG_L7.md`.**
 
 ## Architecture (3 pieces, all built)
 1. **Desktop app** (`app/`, Python + tkinter) — the product buyers run.

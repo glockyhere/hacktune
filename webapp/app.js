@@ -706,7 +706,7 @@ const APP_LABEL = {
   "03_wifishortcut.apk": "Wi-Fi shortcut", "04_yandexnavi.apk": "navigation",
   "05_launcher.apk": "home screen", "df01_freetube.apk": "media",
   "df02_yandexnavi.apk": "navigation", "df03_antiradar.apk": "antiradar",
-  "df04_backbutton.apk": "back button", "l7_freetube.apk": "media",
+  "df04_backbutton.apk": "back button",
   "l7_systemui.apk": "launcher", "l7_langagent.apk": "remote control",
   "l7_settings.apk": "engineering lock",
 };

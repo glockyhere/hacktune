@@ -26,7 +26,6 @@ import base64
 import hashlib
 import hmac
 import json
-import os
 import time
 from pathlib import Path
 
@@ -148,9 +147,10 @@ def _mage_ops() -> list[dict]:
 # --------------------------------------------------------------------------- #
 #  Dongfeng Aeolus L7 (Qualcomm trinket, Android 10 userdebug, root adb).
 #  See docs/DONGFENG_L7.md. Payload pins live in l7/payload.json: 49 Russian
-#  RRO overlays (l7ru_<target>.apk), FreeTube with a 64 px top inset (the L7
-#  status bar reserves no space), the patched SystemUI that adds a tile per
-#  user-installed app to the stock all-apps grid, and the fleet agent launcher.
+#  RRO overlays (l7ru_<target>.apk), the patched SystemUI that adds a tile per
+#  user-installed app to the stock all-apps grid, the patched SystemSettings
+#  that locks the engineering menu behind a per-car password, and the fleet
+#  agent launcher.
 # --------------------------------------------------------------------------- #
 _L7_DIR = Path(__file__).with_name("l7")
 _L7_PAYLOAD = json.loads((_L7_DIR / "payload.json").read_text())
@@ -158,8 +158,6 @@ PAYLOAD.update(_L7_PAYLOAD)
 # SystemUI-tiles is a patch of this exact build's SystemUI: never run elsewhere.
 _L7_FIRMWARE = "QKQ1.210910.001/75:userdebug"
 _L7_AGENT_DIR = "/data/local/l7agent"
-# Per-car engineering password (L8/re/settings-lock): off until verified on a car.
-_L7_LOCK = os.environ.get("L7_LOCK", "") == "1"
 
 
 def _l7_agent_ops(fleet: dict) -> list[dict]:
@@ -236,58 +234,6 @@ def _l7_ru_core() -> list[dict]:
     ]
 
 
-def _l7_ru_ops(ctx: dict | None = None) -> list[dict]:
-    return [
-        *_L7_GATE,
-        *_l7_ru_core(),
-        *(_l7_lock_ops() if _L7_LOCK else []),
-        *_l7_finish(ctx),
-    ]
-
-
-def _l7_lock_ops() -> list[dict]:
-    """Replace the stock engineering passwords (HelloFengshen2023 / PDSN_xxxxxx)
-    with one derived per car from its PDSN and the seller's salt (L8/lock/passwd.py).
-
-    SystemSettings is persistent, so like the SystemUI tiles it can only be
-    updated by a STAGED install, applied on the restart that ends the plan.
-    Android 10 keeps one pending staged session: drop a stale one first.
-    """
-    return [
-        {"op": "shell", "phase": "lock",
-         "cmd": "for id in $(pm get-stagedsessions | sed -n "
-                "'s/.*sessionId = \\([0-9]*\\); isStaged = true; isStagedSessionReady = true.*/\\1/p'); "
-                "do pm install-abandon $id; done"},
-        _install("l7_settings.apk", ["--staged", "--enable-rollback"]) | {"phase": "lock"},
-    ]
-
-
-def _l7_apps_ops(ctx: dict | None = None) -> list[dict]:
-    """Navi, Antiradar, FreeTube + their tiles in the stock all-apps grid."""
-    G = ["-r", "-g"]
-    M = "menu"
-    return [
-        *_L7_GATE,
-        # Navi and Antiradar are the MAGE builds: original signatures
-        _install("df02_yandexnavi.apk", G),
-        *_grant("ru.yandex.yandexnavi"),
-        _install("df03_antiradar.apk", G),
-        *[{"op": "shell", "cmd": f"pm grant com.mybedy.antiradar {p}"} for p in _ANTIRADAR_PERMS],
-        {"op": "shell", "phase": "apps", "cmd": "appops set com.mybedy.antiradar SYSTEM_ALERT_WINDOW allow"},
-        _install("l7_freetube.apk", ["-r"]),
-        # all-apps tiles: SystemUI is persistent, so only a STAGED install may
-        # update it; it applies on the next boot. Drop any half-finished earlier
-        # staged session first, or the new one is refused.
-        {"op": "shell", "phase": M,
-         "cmd": "for id in $(pm get-stagedsessions | sed -n "
-                "'s/.*sessionId = \\([0-9]*\\); isStaged = true; isStagedSessionReady = true.*/\\1/p'); "
-                "do pm install-abandon $id; done"},
-        _install("l7_systemui.apk", ["--staged", "--enable-rollback"]) | {"phase": M},
-        *_l7_finish(ctx),
-    ]
-
-
-# l7_settings.apk is pinned either way; L7_LOCK decides whether a plan uses it
 # Android 10 keeps ONE pending staged session, so SystemUI (launcher tiles) and
 # SystemSettings (engineering lock) go up as a single multi-package session.
 # The files are pushed first (verified on the way), then pm builds the session.
@@ -328,32 +274,23 @@ def _l7_ops(ctx: dict | None = None) -> list[dict]:
     return [*_L7_GATE, *_l7_ru_core(), *_l7_system_ops(), *_l7_finish(ctx)]
 
 
-_L7_RU_FILES = {f for f in _L7_PAYLOAD if f.startswith("l7ru_")} | {"l7_langagent.apk", "l7_settings.apk"}
-_L7_APPS_FILES = {"l7_freetube.apk", "l7_systemui.apk", "l7_langagent.apk"}
+_L7_FILES = {f for f in _L7_PAYLOAD if f.startswith("l7ru_")} | {"l7_langagent.apk", *_L7_SYSTEM}
 
 RECIPES = {
     "faw_b70":       {"name": "FAW B70 (ECARX)",      "connection": "wireless", "build": _faw_ops},
     "dongfeng_mage": {"name": "Dongfeng Aeolus MAGE", "connection": "usb",      "build": _mage_ops},
-    # The two L7 packages are separate purchases: an activation is only good for
-    # the package it was requested for (its token's `model`, set by the client's
-    # picker), which main.py enforces. Web only: no desktop profile
+    # One L7 package: Russian UI, the launcher patch (a tile for every app the
+    # owner installs) and the engineering menu behind a per-car password that the
+    # seller sells to buyers who want ADB. No apps are installed by us. Tokens
+    # from the retired two-package era ("L7 RU", "L7 Apps") get this package
+    # too; main.py enforces `models`. Web only: no desktop profile
     # (check_recipe.py skips web_only recipes' own files).
-    "dongfeng_l7_ru":   {"name": "Dongfeng Aeolus L7 · Russian interface", "connection": "usb",
-                         "build": _l7_ru_ops, "ctx": True, "web_only": True, "files": _L7_RU_FILES,
-                         "model": "L7 RU",
-                         "done": "The head unit restarts by itself in about 20 seconds and "
-                                 "comes back in Russian."},
-    "dongfeng_l7":      {"name": "Dongfeng Aeolus L7", "connection": "usb",
-                         "build": _l7_ops, "ctx": True, "web_only": True,
-                         "files": _L7_RU_FILES | set(_L7_SYSTEM),
-                         "model": "L7",
-                         "done": "The head unit restarts by itself in about 20 seconds and comes back "
-                                 "in Russian. Apps you install later get their own tile under All apps."},
-    "dongfeng_l7_apps": {"name": "Dongfeng Aeolus L7 · Apps", "connection": "usb",
-                         "build": _l7_apps_ops, "ctx": True, "web_only": True, "files": _L7_APPS_FILES,
-                         "model": "L7 Apps",
-                         "done": "The head unit restarts by itself in about 20 seconds. Navigator, "
-                                 "ContraCam and FreeTube then have their own tiles under All apps."},
+    "dongfeng_l7": {"name": "Dongfeng Aeolus L7", "connection": "usb",
+                    "build": _l7_ops, "ctx": True, "web_only": True, "files": _L7_FILES,
+                    "models": ("L7", "L7 RU", "L7 Apps"),
+                    "done": "The head unit restarts by itself in about 20 seconds and comes back "
+                            "in Russian. Apps installed later get their own tile under All apps "
+                            "after the next restart."},
 }
 
 
