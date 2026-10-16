@@ -16,6 +16,7 @@ import os
 import subprocess
 import sys
 import tempfile
+import time
 import urllib.request
 
 BAD = ("Exception", "Failure", "error:", "Error:", "Denied")
@@ -36,8 +37,11 @@ def main() -> int:
     ap.add_argument("--dry-run", action="store_true")
     a = ap.parse_args()
 
+    # like the web client: the unit's serial keys its fleet enrolment
+    serial = adb(a.serial, "shell", "getprop ro.serialno").strip()
     req = urllib.request.Request(f"{a.api}/api/plan", method="POST",
-                                 data=json.dumps({"token": a.token, "profile": a.profile}).encode(),
+                                 data=json.dumps({"token": a.token, "profile": a.profile,
+                                                  "serial": serial}).encode(),
                                  headers={"content-type": "application/json"})
     plan = json.load(urllib.request.urlopen(req, timeout=60))
     ops = plan["ops"]
@@ -62,19 +66,41 @@ def main() -> int:
             if sh(f"getprop {op['key']}").strip() != op["value"]:
                 sys.exit(f"{tag}: setprop rejected")
         elif k in ("install", "push"):
-            data = urllib.request.urlopen(a.api + op["url"], timeout=300).read()
-            if hashlib.sha256(data).hexdigest() != op["sha256"]:
-                sys.exit(f"{tag}: checksum mismatch for {op['file']}")
+            for attempt in range(4):        # the Mac's own link drops too
+                try:
+                    data = urllib.request.urlopen(a.api + op["url"], timeout=300).read()
+                    if hashlib.sha256(data).hexdigest() == op["sha256"]:
+                        break
+                    print(tag, "checksum mismatch, downloading again")
+                except OSError as e:
+                    print(tag, f"download failed ({e}), retrying")
+                time.sleep(5 * (attempt + 1))
+            else:
+                sys.exit(f"{tag}: could not download {op['file']}")
             with tempfile.NamedTemporaryFile(suffix=".apk", delete=False) as f:
                 f.write(data)
             remote = op["to"] if k == "push" else f"/data/local/tmp/carapk_plan_{i}.apk"
-            adb(a.serial, "push", f.name, remote)
+            # a USB drop answers with nothing: wait for the unit and redo the step
+            # (every step is idempotent), as the web client does
+            for attempt in range(3):
+                adb(a.serial, "wait-for-device")
+                pushed = subprocess.run(["adb"] + (["-s", a.serial] if a.serial else [])
+                                        + ["push", f.name, remote], capture_output=True, text=True)
+                if pushed.returncode != 0:
+                    print(tag, "push dropped, retrying"); time.sleep(5); continue
+                if k == "push":
+                    break
+                out = sh(f"pm install {' '.join(op.get('flags') or [])} {remote}")
+                sh(f"rm -f {remote}")
+                if "Success" in out or out.strip():
+                    break
+                print(tag, "no answer from the unit, retrying"); time.sleep(5)
             os.unlink(f.name)
             if k == "push":
+                if pushed.returncode != 0:
+                    sys.exit(f"{tag}: could not copy {op['file']}")
                 print(tag, op["file"], "copied")
                 continue
-            out = sh(f"pm install {' '.join(op.get('flags') or [])} {remote}")
-            sh(f"rm -f {remote}")
             if "Success" not in out:
                 sys.exit(f"{tag}: install {op['file']} failed: {out.strip()}")
             print(tag, op["file"], "installed")
