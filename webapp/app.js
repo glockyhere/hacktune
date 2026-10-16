@@ -642,6 +642,7 @@ async function connect() {
       method: "POST", headers: { "content-type": "application/json" },
       body: JSON.stringify({ token: state.token, profile: state.profile.id, serial: state.serial }),
     });
+    state.planAt = Date.now();
     // Relinking after a dropped Wi-Fi link must not replay everything. The ops
     // are idempotent, but re-pushing ~100 MB over Wi-Fi is not free, and the
     // buyer already watched it once. Same car, same plan shape: keep the cursor.
@@ -979,6 +980,7 @@ async function cachePut(sha, bytes) {
 
 // Start downloading the next few install ops after op i (cache hits cost nothing).
 function prefetchAfter(i) {
+  if (urlsStale()) return;              // links about to lapse: the foreground refreshes them
   const ops = state.plan.ops;
   let ahead = 0;
   for (let j = i + 1; j < ops.length && ahead < PREFETCH_AHEAD; j++) {
@@ -998,8 +1000,12 @@ async function payload(op, i, label) {
   if (!bytes) {
     const p = prefetched.get(op.file);
     how = p ? "prefetched" : "downloaded";
-    try { bytes = await (p || download(op, i, label)); }
-    catch { bytes = await download(op, i, label); how = "downloaded"; }
+    if (p) {
+      try { bytes = await p; }
+      catch { bytes = await fetchWithRetry(op, i, label); how = "downloaded"; }   // failed prefetch: redo here
+    } else {
+      bytes = await fetchWithRetry(op, i, label);
+    }
   }
   prefetched.delete(op.file);
   if (!(await sha256ok(bytes, op.sha256))) {
@@ -1011,10 +1017,56 @@ async function payload(op, i, label) {
   return bytes;
 }
 
+// Signed download URLs expire DOWNLOAD_TTL (15 min) after the plan was issued,
+// and an L7 install can outlast that. Fetch fresh ones shortly before they
+// lapse, and whenever the server refuses one. Same token, same plan: only the
+// URLs change, so the cursor and progress stay where they are.
+const urlsStale = () =>
+  Date.now() > (state.planAt || 0) + ((state.plan?.expires_in || 900) - 90) * 1000;
+async function refreshUrls() {
+  const fresh = await api("/api/plan", {
+    method: "POST", headers: { "content-type": "application/json" },
+    body: JSON.stringify({ token: state.token, profile: state.profile.id, serial: state.serial }),
+  });
+  if (fresh.ops.length !== state.plan.ops.length)
+    throw new Error("The install plan changed on the server. Press Connect to continue.");
+  fresh.ops.forEach((o, k) => { if (o.url) state.plan.ops[k].url = o.url; });
+  state.plan.expires_in = fresh.expires_in;
+  state.planAt = Date.now();
+  tele("download links refreshed", "dim");
+}
+
+// A dropped mobile link or a reset connection must not stop a paid install:
+// try again a few times, with fresh links when the old ones were refused.
+async function fetchWithRetry(op, i, label) {
+  for (let attempt = 1; ; attempt++) {
+    try {
+      if (urlsStale()) await refreshUrls();
+      const bytes = await download(op, i, label);
+      // a connection cut mid-body can end early without an error: check it here,
+      // so a short file is fetched again instead of stopping the install
+      if (await sha256ok(bytes, op.sha256)) return bytes;
+      throw new Error("incomplete download");
+    } catch (e) {
+      if (attempt > 3)
+        throw new Error(`The ${label} download keeps failing. Check the internet connection, then press Resume.`);
+      if (e.status === 403) state.planAt = 0;          // refused link: refresh first
+      tele(`download · ${label} · ${e.message} · retrying (${attempt}/3)`, "er");
+      status("run-status", "The internet connection dropped. Retrying…");
+      await sleep(2000 * attempt);
+      status("run-status", "Keep the head unit connected.");
+    }
+  }
+}
+
 // `label` null = background prefetch: no progress bar updates.
 async function download(op, i, label) {
   const r = await fetch(API + op.url);
-  if (!r.ok) throw new Error(`Download failed (${r.status}).`);
+  if (!r.ok) {
+    const err = new Error(`Download failed (${r.status}).`);
+    err.status = r.status;
+    throw err;
+  }
   // gzip-served files: Content-Length is the compressed size, the decoded size
   // (what the reader yields) comes in X-Decoded-Length
   const total = Number(r.headers.get("X-Decoded-Length") || r.headers.get("Content-Length")) || 0;
