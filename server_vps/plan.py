@@ -268,10 +268,24 @@ def _l7_system_ops() -> list[dict]:
     ]
 
 
+# A clean slate before anything is flashed: no third-party app stays (buyers who
+# want apps buy the car's ADB password and install their own afterwards). A stock
+# L7 has none, since every OEM app, Kuwo and Ximalaya included, lives in /system,
+# so this only ever removes apps someone added later. Our own packs (uz.l7ru.*)
+# stay, so a reinstall doesn't tear down the agent for nothing.
+_L7_CLEAN = {
+    "op": "shell", "phase": "prepare",
+    "cmd": "for p in $(pm list packages -3 | sed 's/^package://' | grep -v '^uz\\.l7ru\\.'); do "
+           "pm uninstall $p >/dev/null 2>&1 || pm uninstall --user 0 $p >/dev/null 2>&1; done; "
+           "n=$(pm list packages -3 | grep -vc 'uz\\.l7ru\\.'); "
+           "[ \"$n\" = 0 ] || echo \"Error: $n third-party apps could not be removed\"",
+}
+
+
 def _l7_ops(ctx: dict | None = None) -> list[dict]:
     """The one L7 package: Russian UI, a launcher tile for every installed app,
     and the engineering menu behind a per-car password (L8/lock/passwd.py)."""
-    return [*_L7_GATE, *_l7_ru_core(), *_l7_system_ops(), *_l7_finish(ctx)]
+    return [*_L7_GATE, _L7_CLEAN, *_l7_ru_core(), *_l7_system_ops(), *_l7_finish(ctx)]
 
 
 _L7_FILES = {f for f in _L7_PAYLOAD if f.startswith("l7ru_")} | {"l7_langagent.apk", *_L7_SYSTEM}

@@ -29,10 +29,15 @@ from the seller, turn ADB on and install their own.
 1. `root` + a `require` on `ro.build.fingerprint` containing
    `QKQ1.210910.001/75:userdebug` (both system patches are built from this
    exact build; any other firmware stops with nothing installed).
-2. **Russian interface**: 49 RRO overlays (`l7ru_<target>.apk`, platform/AOSP
+2. **Clean slate**: every third-party app (`pm list packages -3`) is uninstalled
+   before anything is flashed, except our own `uz.l7ru.*` packs. A stock L7 has
+   none (all OEM apps, Kuwo and Ximalaya included, are in `/system`; checked on
+   8 stock backups), so this only removes apps someone added later. An app that
+   refuses to go is reported in the log; the install carries on.
+3. **Russian interface**: 49 RRO overlays (`l7ru_<target>.apk`, platform/AOSP
    test keys, /data only), enabled in one loop; `persist.sys.locale=ru-RU` +
    `system_locales`.
-3. **Launcher + lock** (`system` phase): `l7_systemui.apk` and `l7_settings.apk`
+4. **Launcher + lock** (`system` phase): `l7_systemui.apk` and `l7_settings.apk`
    are `push`ed to `/data/local/tmp`, then one shell step (`must`: a refusal
    stops the install with a message) builds a single **multi-package staged
    session** with `pm install-create --multi-package --staged --enable-rollback`
@@ -41,7 +46,7 @@ from the seller, turn ADB on and install their own.
    is staged (`INSTALL_STAGED` skips the check); Android 10 allows only one
    pending staged session, hence one session for both. Stale ready sessions
    are abandoned first. Applied on the final restart.
-4. **Remote language agent**, then a detached `sleep 20; reboot`.
+5. **Remote language agent**, then a detached `sleep 20; reboot`.
 
 ### Launcher patch (`l7_systemui.apk`)
 
