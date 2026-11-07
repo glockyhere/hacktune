@@ -74,8 +74,31 @@ def _grant(pkg: str) -> list[dict]:
 # --------------------------------------------------------------------------- #
 #  The recipes, as op lists. `_install` is filled with a signed URL per session.
 # --------------------------------------------------------------------------- #
+# Package each payload file installs. Sent with the install op so the client
+# can clear a conflicting copy (older/newer build, other signature) already on
+# the unit and retry: data, not logic -- the client still decides nothing.
+PKG = {
+    "01_backbutton.apk": "nu.back.button",
+    "02_freetube.apk": "freetube.com",
+    "03_wifishortcut.apk": "com.wifi.shortcut",
+    "04_yandexnavi.apk": "ru.yandex.yandexnavi",
+    "05_launcher.apk": "com.fawcar.dlife6.launcher",
+    "df01_freetube.apk": "freetube.com",
+    "df02_yandexnavi.apk": "ru.yandex.yandexnavi",
+    "df03_antiradar.apk": "com.mybedy.antiradar",
+    "df04_backbutton.apk": "nu.back.button",
+}
+
+
 def _install(file: str, flags: list[str]) -> dict:
-    return {"op": "install", "file": file, "sha256": PAYLOAD[file], "flags": flags}
+    op = {"op": "install", "file": file, "sha256": PAYLOAD[file], "flags": flags}
+    # never for the B70 launcher: it updates a system app, and uninstalling it
+    # would roll the unit back to the factory launcher mid-install
+    if file in PKG and file != "05_launcher.apk":
+        op["pkg"] = PKG[file]
+    return op
+
+
 
 
 def _push(file: str, to: str) -> dict:

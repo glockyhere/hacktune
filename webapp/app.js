@@ -871,6 +871,19 @@ function buildRecap() {
     `<div><dt>${k}</dt><dd>${escapeHtml(v)}</dd></div>`).join("");
 }
 
+// pm's answer when the unit already holds a copy it refuses to replace
+const CONFLICT = /INSTALL_FAILED_(UPDATE_INCOMPATIBLE|VERSION_DOWNGRADE)|signatures do not match/i;
+
+// The useful part of `pm install` output: the INSTALL_FAILED_* code and its
+// reason, or the last line. Shown to the buyer and the seller as-is.
+function installReason(output) {
+  const text = (output || "").trim();
+  const m = text.match(/(INSTALL_[A-Z_]+|DF APK cert incorrect)[^\n\]]*/);
+  if (m) return m[0].trim().slice(0, 140);
+  const last = text.split("\n").filter(Boolean).pop();
+  return last ? last.slice(0, 140) : "no answer from the unit";
+}
+
 async function execOp(op, i) {
   const adb = state.adb;
   switch (op.op) {
@@ -912,7 +925,20 @@ async function execOp(op, i) {
           }, 200);
         }
       }).finally(() => clearInterval(creep));
-      if (!res.ok) throw new Error(`Could not install the ${label}.`);
+      let out = res;
+      // A copy already on the unit that Android won't replace: a newer build
+      // (downgrade) or one signed with another key. The plan names the package;
+      // remove that copy and install ours once more.
+      if (!out.ok && op.pkg && CONFLICT.test(out.output)) {
+        tele(`install · ${label} · ${installReason(out.output)} · replacing`, "dim");
+        await adb.shell(`pm uninstall ${op.pkg}`);
+        out = await adb.install(bytes, op.flags, () => {});
+      }
+      if (!out.ok) {
+        const why = installReason(out.output);
+        tele(`install · ${label} · ${why}`, "er");
+        throw new Error(`Could not install the ${label} (${why}).`);
+      }
       tele(`install · ${label} · installed`, "ok"); return;
     }
     case "push": {
