@@ -931,8 +931,19 @@ async function execOp(op, i) {
       // remove that copy and install ours once more.
       if (!out.ok && op.pkg && CONFLICT.test(out.output)) {
         tele(`install · ${label} · ${installReason(out.output)} · replacing`, "dim");
-        await adb.shell(`pm uninstall ${op.pkg}`);
+        const un = ((await adb.shell(`pm uninstall ${op.pkg}`)).stdout || "").trim();
+        tele(`install · ${label} · remove old copy · ${un.slice(0, 120) || "no answer"}`, "dim");
         out = await adb.install(bytes, op.flags, () => {});
+        // Still refused: the copy can't be removed (typically built into the
+        // firmware, seen on a MAGE 2026-11-07). The unit already has the app,
+        // so keep that copy and carry on; the menu step still adds its tile.
+        if (!out.ok && CONFLICT.test(out.output)) {
+          const where = ((await adb.shell(`pm path ${op.pkg}`)).stdout || "").trim();
+          if (where.includes("package:")) {
+            tele(`install · ${label} · keeping the copy already on the unit · ${where.split("\n")[0].slice(8, 90)}`, "ok");
+            return;
+          }
+        }
       }
       if (!out.ok) {
         const why = installReason(out.output);
