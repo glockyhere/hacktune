@@ -1,0 +1,317 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>Car control</title>
+<link rel="icon" href="/favicon.svg">
+<link rel="stylesheet" href="/vendor/fonts.css">
+<script src="/config.js"></script>
+<style>
+  :root {
+    --void:   oklch(0.145 0.006 250);
+    --ground: oklch(0.185 0.006 250);
+    --card:   oklch(0.205 0.006 250);
+    --etch:   oklch(0.275 0.007 250);
+    --edge:   oklch(0.520 0.008 250);
+    --ink:    oklch(0.975 0.003 250);
+    --ink-2:  oklch(0.760 0.006 250);
+    --ink-3:  oklch(0.630 0.007 250);
+    --lume:   oklch(0.845 0.145 82);
+    --pass:   oklch(0.86 0.12 155);
+    --stop:   oklch(0.72 0.17 26);
+    --mono: "Martian Mono", ui-monospace, "SF Mono", Menlo, monospace;
+    --grot: "Archivo Variable", "Archivo", system-ui, sans-serif;
+    --ease: cubic-bezier(0.16, 1, 0.3, 1);
+    color-scheme: dark;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; min-height: 100vh; background: var(--void); color: var(--ink-2);
+    font: 400 16px/1.5 var(--grot); -webkit-font-smoothing: antialiased;
+    padding: 24px 16px 64px;
+  }
+  .wrap { max-width: 1040px; margin: 0 auto; }
+  h1 { font: 600 13px/1 var(--mono); letter-spacing: 0.22em; text-transform: uppercase;
+       color: var(--ink-3); margin: 0 0 24px; }
+  h1 b { color: var(--lume); font-weight: 600; }
+  .mono { font-family: var(--mono); }
+  button {
+    font: 500 14px/1 var(--grot); color: var(--ink); background: var(--ground);
+    border: 1px solid var(--edge); border-radius: 10px; padding: 11px 16px;
+    cursor: pointer; transition: border-color 160ms var(--ease), background 160ms var(--ease);
+  }
+  button:hover { border-color: var(--lume); }
+  button:active { transform: translateY(1px); }
+  button.primary { background: var(--lume); color: var(--void); border-color: var(--lume); font-weight: 600; }
+  button.danger:hover { border-color: var(--stop); color: var(--stop); }
+  button:disabled { opacity: 0.4; cursor: not-allowed; }
+  input, select, textarea {
+    font: 400 15px/1.4 var(--mono); color: var(--ink); background: var(--void);
+    border: 1px solid var(--edge); border-radius: 10px; padding: 11px 13px; width: 100%;
+  }
+  input:focus, select:focus, textarea:focus, button:focus-visible {
+    outline: 2px solid var(--lume); outline-offset: 2px;
+  }
+  .card { background: var(--ground); border: 1px solid var(--etch); border-radius: 16px; padding: 20px; }
+  .grid { display: grid; gap: 16px; grid-template-columns: 1fr 1fr; }
+  @media (max-width: 760px) { .grid { grid-template-columns: 1fr; } }
+  .row { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+  .kicker { font: 600 11px/1 var(--mono); letter-spacing: 0.18em; text-transform: uppercase;
+            color: var(--ink-3); margin: 0 0 14px; }
+  .hide { display: none !important; }
+
+  /* gate */
+  #gate { max-width: 420px; margin: 8vh auto 0; }
+  #gate p { color: var(--ink-3); font-size: 14px; }
+
+  /* status */
+  .dot { width: 10px; height: 10px; border-radius: 50%; background: var(--ink-3); flex: none; }
+  .dot.on { background: var(--pass); box-shadow: 0 0 0 4px oklch(0.86 0.12 155 / 0.18); }
+  .dot.off { background: var(--stop); }
+  .state { font: 600 18px/1 var(--grot); color: var(--ink); }
+  dl.facts { display: grid; grid-template-columns: auto 1fr; gap: 8px 18px; margin: 16px 0 0; }
+  dl.facts dt { font: 500 11px/1.4 var(--mono); letter-spacing: 0.1em; text-transform: uppercase; color: var(--ink-3); }
+  dl.facts dd { margin: 0; font-family: var(--mono); font-size: 14px; color: var(--ink); overflow-wrap: anywhere; }
+
+  /* screen */
+  .screen-frame { background: var(--void); border: 1px solid var(--etch); border-radius: 12px;
+                  overflow: hidden; aspect-ratio: 16/9; display: grid; place-items: center; }
+  .screen-frame img { width: 100%; height: 100%; object-fit: contain; display: block; }
+  .screen-frame .ph { color: var(--ink-3); font-family: var(--mono); font-size: 13px; }
+
+  /* console */
+  pre.out { background: var(--void); border: 1px solid var(--etch); border-radius: 10px;
+            padding: 13px; margin: 12px 0 0; max-height: 320px; overflow: auto;
+            font-family: var(--mono); font-size: 13px; color: var(--ink-2); white-space: pre-wrap;
+            overflow-wrap: anywhere; }
+  .toast { position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%);
+           background: var(--card); border: 1px solid var(--edge); border-radius: 10px;
+           padding: 11px 18px; color: var(--ink); font-size: 14px; box-shadow: 0 8px 30px #0008;
+           opacity: 0; transition: opacity 200ms var(--ease); pointer-events: none; z-index: 9; }
+  .toast.show { opacity: 1; }
+  .stack > * + * { margin-top: 16px; }
+  label.lbl { display: block; font: 600 11px/1 var(--mono); letter-spacing: 0.14em;
+              text-transform: uppercase; color: var(--ink-3); margin: 0 0 8px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Axolotl <b>· car control</b></h1>
+
+  <!-- passphrase gate -->
+  <div id="gate" class="card">
+    <p class="kicker">Locked</p>
+    <p>This panel controls the head unit directly. Enter the passphrase to unlock it.</p>
+    <div class="stack">
+      <input id="pass" type="password" placeholder="passphrase" autocomplete="current-password">
+      <div class="row">
+        <button id="unlock" class="primary">Unlock</button>
+        <label class="row" style="gap:7px; font-size:13px; color:var(--ink-3); cursor:pointer;">
+          <input type="checkbox" id="remember" style="width:auto;" checked> remember on this device
+        </label>
+      </div>
+      <p id="gateErr" style="color:var(--stop); font-size:13px; margin:0;" class="hide"></p>
+    </div>
+  </div>
+
+  <!-- the panel -->
+  <main id="panel" class="hide stack">
+    <div class="grid">
+      <!-- status -->
+      <section class="card">
+        <p class="kicker">Status</p>
+        <div class="row" style="gap:12px;">
+          <span class="dot" id="dot"></span>
+          <span class="state" id="stateText">checking…</span>
+          <button id="refresh" style="margin-left:auto;">Refresh</button>
+        </div>
+        <dl class="facts" id="facts"></dl>
+      </section>
+
+      <!-- live screen -->
+      <section class="card">
+        <div class="row" style="margin-bottom:14px;">
+          <p class="kicker" style="margin:0;">Live screen</p>
+          <label class="row" style="margin-left:auto; gap:7px; font-size:13px; color:var(--ink-3); cursor:pointer;">
+            <input type="checkbox" id="auto" style="width:auto;"> auto-refresh
+          </label>
+        </div>
+        <div class="screen-frame">
+          <img id="shot" alt="" class="hide">
+          <span class="ph" id="shotPh">no image yet</span>
+        </div>
+        <div class="row" style="margin-top:12px;">
+          <button id="grab">Capture</button>
+        </div>
+      </section>
+    </div>
+
+    <!-- quick actions -->
+    <section class="card">
+      <p class="kicker">Quick actions</p>
+      <div class="row" style="margin-bottom:16px;">
+        <select id="appSel" style="max-width:360px;"><option value="">— installed apps —</option></select>
+        <button id="launch">Launch</button>
+      </div>
+      <div class="row">
+        <button data-cmd="dumpsys location | sed -n '1,40p'">GPS status</button>
+        <button data-cmd="am force-stop uz.axolotl.phonegps; am start -n uz.axolotl.phonegps/.StatusActivity">Restart GPS app</button>
+        <button data-cmd="pm list packages -3">List apps</button>
+        <button data-cmd="dumpsys power | grep -E 'mWakefulness|mScreenOn' ">Screen state</button>
+        <button data-cmd="input keyevent 26">Power button</button>
+        <button id="reboot" class="danger">Reboot unit</button>
+      </div>
+    </section>
+
+    <!-- free command -->
+    <section class="card">
+      <p class="kicker">ADB shell</p>
+      <label class="lbl" for="cmd">adb -s &lt;car&gt; shell …</label>
+      <div class="row">
+        <input id="cmd" class="mono" placeholder="getprop ro.product.model" spellcheck="false" autocapitalize="off">
+        <button id="runCmd" class="primary">Run</button>
+      </div>
+      <pre class="out" id="out">ready.</pre>
+    </section>
+
+    <div class="row" style="justify-content:flex-end;">
+      <button id="lock">Lock panel</button>
+    </div>
+  </main>
+</div>
+<div class="toast" id="toast"></div>
+
+<script>
+const API = (window.CARAPK && window.CARAPK.API || "").replace(/\/+$/, "");
+const KEYNAME = "axolotl-car-key";
+let KEY = sessionStorage.getItem(KEYNAME) || localStorage.getItem(KEYNAME) || "";
+let autoTimer = null;
+
+const $ = (id) => document.getElementById(id);
+function toast(msg) {
+  const t = $("toast"); t.textContent = msg; t.classList.add("show");
+  clearTimeout(toast._t); toast._t = setTimeout(() => t.classList.remove("show"), 2600);
+}
+
+async function call(path, body) {
+  const r = await fetch(API + path, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "X-Car-Key": KEY },
+    body: JSON.stringify(body || {}),
+  });
+  if (r.status === 401) { lock("Passphrase rejected."); throw new Error("unauthorized"); }
+  const data = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(data.detail || ("HTTP " + r.status));
+  return data;
+}
+
+function showPanel() { $("gate").classList.add("hide"); $("panel").classList.remove("hide"); }
+function lock(msg) {
+  KEY = ""; sessionStorage.removeItem(KEYNAME); localStorage.removeItem(KEYNAME);
+  if (autoTimer) { clearInterval(autoTimer); autoTimer = null; $("auto").checked = false; }
+  $("panel").classList.add("hide"); $("gate").classList.remove("hide");
+  if (msg) { const e = $("gateErr"); e.textContent = msg; e.classList.remove("hide"); }
+}
+
+async function unlock() {
+  const val = $("pass").value.trim();
+  if (!val) return;
+  KEY = val;
+  try {
+    $("unlock").disabled = true;
+    await call("/api/car/status");          // validates the passphrase
+    if ($("remember").checked) localStorage.setItem(KEYNAME, val);
+    else sessionStorage.setItem(KEYNAME, val);
+    $("gateErr").classList.add("hide"); $("pass").value = "";
+    showPanel(); refresh();
+  } catch (e) {
+    KEY = "";
+    const el = $("gateErr"); el.textContent = e.message === "unauthorized" ? "Wrong passphrase." : ("Error: " + e.message);
+    el.classList.remove("hide");
+  } finally { $("unlock").disabled = false; }
+}
+
+const FACTS = [["model","Model"],["brand","Brand"],["serial","Serial"],["android","Android"],
+               ["uptime","Uptime"],["battery","Battery"],["clock","Car clock"],["target","Tunnel"]];
+function fmtUptime(s) {
+  s = parseInt(s, 10); if (isNaN(s)) return null;
+  const d = Math.floor(s/86400), h = Math.floor(s%86400/3600), m = Math.floor(s%3600/60);
+  return (d?d+"d ":"") + (h?h+"h ":"") + m + "m";
+}
+
+async function refresh() {
+  $("refresh").disabled = true;
+  try {
+    const s = await call("/api/car/status");
+    const online = !!s.online;
+    $("dot").className = "dot " + (online ? "on" : "off");
+    $("stateText").textContent = online ? "Online" : ("Offline · " + (s.state || "no link"));
+    s.uptime = fmtUptime(s.uptime_s);
+    if (s.battery) s.battery = s.battery + "%";
+    const dl = $("facts"); dl.innerHTML = "";
+    for (const [k, label] of FACTS) {
+      if (!s[k]) continue;
+      dl.insertAdjacentHTML("beforeend", `<dt>${label}</dt><dd></dd>`);
+      dl.lastChild.textContent = s[k];
+    }
+    const sel = $("appSel"); const cur = sel.value;
+    sel.innerHTML = '<option value="">— installed apps —</option>';
+    for (const p of (s.apps || [])) {
+      const o = document.createElement("option"); o.value = o.textContent = p; sel.appendChild(o);
+    }
+    sel.value = cur;
+  } catch (e) {
+    $("dot").className = "dot off"; $("stateText").textContent = "Error";
+    toast(e.message);
+  } finally { $("refresh").disabled = false; }
+}
+
+function grab() {
+  const img = $("shot"), ph = $("shotPh");
+  ph.textContent = "capturing…";
+  const url = API + "/api/car/screen?key=" + encodeURIComponent(KEY) + "&t=" + Date.now();
+  img.onload = () => { img.classList.remove("hide"); ph.classList.add("hide"); };
+  img.onerror = () => { img.classList.add("hide"); ph.classList.remove("hide"); ph.textContent = "no screen (is the car online?)"; };
+  img.src = url;
+}
+
+async function runCmd(cmd) {
+  const out = $("out");
+  out.textContent = "$ " + cmd + "\n…";
+  try {
+    const r = await call("/api/car/shell", { cmd });
+    out.textContent = "$ " + cmd + "\n" + (r.out || "(no output)") + (r.code ? "\n[exit " + r.code + "]" : "");
+  } catch (e) { out.textContent = "$ " + cmd + "\n" + e.message; }
+}
+
+// wiring
+$("unlock").onclick = unlock;
+$("pass").addEventListener("keydown", (e) => { if (e.key === "Enter") unlock(); });
+$("lock").onclick = () => lock("");
+$("refresh").onclick = refresh;
+$("grab").onclick = grab;
+$("auto").addEventListener("change", (e) => {
+  if (e.target.checked) { grab(); autoTimer = setInterval(grab, 3000); }
+  else if (autoTimer) { clearInterval(autoTimer); autoTimer = null; }
+});
+$("launch").onclick = async () => {
+  const pkg = $("appSel").value; if (!pkg) { toast("Pick an app first."); return; }
+  try { await call("/api/car/launch", { pkg }); toast("Launched " + pkg); }
+  catch (e) { toast(e.message); }
+};
+$("reboot").onclick = async () => {
+  if (!confirm("Reboot the head unit now?")) return;
+  try { await call("/api/car/reboot"); toast("Reboot sent. The car drops off for ~30s."); }
+  catch (e) { toast(e.message); }
+};
+document.querySelectorAll("[data-cmd]").forEach((b) => b.onclick = () => runCmd(b.dataset.cmd));
+$("runCmd").onclick = () => { const c = $("cmd").value.trim(); if (c) runCmd(c); };
+$("cmd").addEventListener("keydown", (e) => { if (e.key === "Enter") { const c = e.target.value.trim(); if (c) runCmd(c); } });
+
+if (!API) { $("gateErr").textContent = "config.js has no API address."; $("gateErr").classList.remove("hide"); }
+else if (KEY) { showPanel(); refresh(); }
+</script>
+</body>
+</html>

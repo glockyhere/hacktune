@@ -17,6 +17,7 @@ from fastapi import FastAPI, Request, Header, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 
+import car as car_mod
 import plan as plan_mod
 from fleet import Fleet
 from store import Store
@@ -72,6 +73,9 @@ app.add_middleware(
     expose_headers=["X-Decoded-Length", "Content-Length"],
     max_age=600,
 )
+
+# Remote control for the owner's own tunnelled head unit (passphrase-gated).
+app.include_router(car_mod.router)
 
 
 @app.on_event("startup")
